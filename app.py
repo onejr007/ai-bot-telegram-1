@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
 # Token bot Telegram
-TELEGRAM_BOT_TOKEN = "7600970527:AAGnn2Kkfz1yVt4vwrqLLohmu9V87E5hyAQ"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # File JSON untuk menyimpan history chat
 HISTORY_FILE = "chat_history.json"
