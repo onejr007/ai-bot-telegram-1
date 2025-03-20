@@ -169,8 +169,10 @@ async def main():
 # Jalankan bot
 if __name__ == "__main__":
     try:
-        asyncio.run(main())  # Coba jalankan dengan asyncio.run() (untuk lokal)
+        asyncio.get_running_loop()
     except RuntimeError:
-        # Jika event loop sudah berjalan (Railway), gunakan cara lain
-        loop = asyncio.get_event_loop()
-        loop.create_task(main())  # Jalankan sebagai task non-blocking
+        # Jika tidak ada event loop, jalankan `asyncio.run()`
+        asyncio.run(main())
+    else:
+        # Jika event loop sudah berjalan (Railway), jalankan `main()` langsung
+        asyncio.create_task(main())
