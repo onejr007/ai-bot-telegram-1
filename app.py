@@ -11,18 +11,14 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram import InlineQueryResultArticle, InputTextMessageContent
 
-# Terapkan nest_asyncio agar tidak error event loop
 nest_asyncio.apply()
 
-# Logging untuk debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# File JSON
 CHAT_HISTORY_FILE = "chat_history.json"
 PRICE_HISTORY_FILE = "price_history.json"
 
-# Fungsi untuk memuat data dari JSON
 def load_data(filename):
     if not os.path.exists(filename):
         return []
@@ -32,20 +28,17 @@ def load_data(filename):
         except json.JSONDecodeError:
             return []
 
-# Fungsi untuk menyimpan data ke JSON
 def save_data(filename, data):
     with open(filename, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=4, ensure_ascii=False)
 
-# Fungsi untuk melatih model Markov
 def train_markov():
     data = load_data(CHAT_HISTORY_FILE)
     if len(data) < 3:
-        return None  # Jangan buat model jika dataset terlalu kecil
+        return None
     text_data = " ".join(data)
     return markovify.Text(text_data, state_size=2)
 
-# Fungsi untuk prediksi teks Markov
 def predict_markov(text):
     model = train_markov()
     if model:
@@ -56,14 +49,12 @@ def predict_markov(text):
             return None
     return None
 
-# Fungsi untuk menambahkan teks ke history
 def add_to_history(text):
     data = load_data(CHAT_HISTORY_FILE)
     if text not in data:
         data.append(text)
         save_data(CHAT_HISTORY_FILE, data)
 
-# Fungsi untuk mencari prediksi dari Google Auto Suggest
 def predict_google(text):
     try:
         url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={text}"
@@ -75,7 +66,6 @@ def predict_google(text):
         return []
     return []
 
-# Fungsi untuk scraping harga dari berbagai sumber
 def scrape_price(query):
     search_url = f"https://www.google.com/search?q={query}+harga"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -94,13 +84,11 @@ def scrape_price(query):
 
     return prices[:5] if prices else None
 
-# Fungsi untuk menyimpan jawaban harga di dataset
 def save_price_data(question, answer):
     data = load_data(PRICE_HISTORY_FILE)
     data.append({"question": question, "answer": answer})
     save_data(PRICE_HISTORY_FILE, data)
 
-# Fungsi untuk mencari jawaban harga di dataset
 def find_price_in_history(question):
     data = load_data(PRICE_HISTORY_FILE)
     for entry in data:
@@ -108,20 +96,16 @@ def find_price_in_history(question):
             return entry["answer"]
     return None
 
-# Fungsi untuk menangani perintah `/start`
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Halo! Gunakan inline mode dengan '@NamaBot <kata>' untuk mendapatkan prediksi teks atau kirim pertanyaan harga dalam chat.")
+    await update.message.reply_text("Gunakan inline mode dengan '@NamaBot <kata>' untuk prediksi teks atau kirim pertanyaan harga dalam chat.")
 
-# Fungsi untuk menangani inline query (@bot <kata>)
 async def inline_query(update: Update, context: CallbackContext):
     query = update.inline_query.query.strip()
     if not query:
         return
 
-    # Simpan history agar bot belajar
     add_to_history(query)
 
-    # Prediksi teks dengan berbagai metode
     markov_result = predict_markov(query)
     google_results = predict_google(query)
     
@@ -131,11 +115,9 @@ async def inline_query(update: Update, context: CallbackContext):
         if len(words) > 1:
             predictions.append(f"{query} {words[1]}")
     predictions.extend(google_results)
-    
-    # Maksimal 3 prediksi unik
+
     predictions = list(set(predictions))[:3]
-    
-    # Buat hasil inline query
+
     results = [
         InlineQueryResultArticle(
             id=str(uuid.uuid4()),
@@ -148,11 +130,11 @@ async def inline_query(update: Update, context: CallbackContext):
     if results:
         await update.inline_query.answer(results)
 
-# Fungsi untuk menangani pertanyaan harga dalam chat
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
 
-    if "harga" in text:
+    # Jika ini pertanyaan harga dalam chat (bukan inline query)
+    if text.startswith("harga "):
         await update.message.reply_text("🔍 Mencari harga...")
 
         cached_answer = find_price_in_history(text)
@@ -170,17 +152,14 @@ async def handle_message(update: Update, context: CallbackContext):
 
         await update.message.reply_text(answer)
 
-# Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 app = Application.builder().token(TOKEN).build()
 
-# Menambahkan handler
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Fungsi utama untuk menjalankan bot
 async def main():
     logger.info("🚀 Menghapus webhook sebelum memulai polling...")
     await app.bot.delete_webhook()
@@ -189,6 +168,5 @@ async def main():
     loop = asyncio.get_running_loop()
     await app.run_polling()
 
-# Jalankan bot
 if __name__ == "__main__":
     asyncio.run(main())
