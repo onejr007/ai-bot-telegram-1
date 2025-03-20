@@ -65,22 +65,33 @@ def add_to_history(text):
 def predict_google(text):
     try:
         url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={text}"
+        logger.info(f"🌐 Mengirim request ke Google: {url}")
+        
         response = requests.get(url)
         if response.status_code == 200:
             suggestions = response.json()[1]
+            logger.info(f"✅ Google Suggest Hasil untuk '{text}': {suggestions}")
             
             # Jika tidak ada saran, coba dengan kata yang lebih sedikit
             if not suggestions and len(text.split()) > 2:
                 short_text = " ".join(text.split()[:3])
                 url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={short_text}"
+                logger.info(f"🔄 Mengirim request ke Google (fallback): {url}")
+                
                 response = requests.get(url)
                 if response.status_code == 200:
                     suggestions = response.json()[1]
+                    logger.info(f"✅ Google Fallback Hasil: {suggestions}")
 
             return suggestions[:3] if suggestions else []
+        
+        else:
+            logger.error(f"❌ Gagal mengambil prediksi Google. Status Code: {response.status_code}")
+    
     except Exception as e:
         logger.error(f"❌ Gagal mengambil prediksi Google: {e}")
         return []
+    
     return []
 
 def scrape_price(query):
