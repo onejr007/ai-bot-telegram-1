@@ -15,6 +15,9 @@ from telegram import InlineQueryResultArticle, InputTextMessageContent
 
 nest_asyncio.apply()
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+}
 # Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -65,11 +68,8 @@ def add_to_history(text):
 def predict_google(text):
     try:
         url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={text}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-        }
         
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=HEADERS)
         if response.status_code == 200:
             suggestions = response.json()[1]
             if suggestions:
@@ -89,35 +89,99 @@ def predict_google(text):
     
     return []
 
-def scrape_price(query):
+def extract_prices(text):
+    """Mengambil harga dari teks dengan format Rp."""
+    return re.findall(r"Rp ?[\d.,]+", text)
+
+def scrape_google_price(query):
+    """Scraping harga dari Google Search"""
     search_url = f"https://www.google.com/search?q={query}+harga"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(search_url, headers=headers)
+    response = requests.get(search_url, headers=HEADERS)
 
     if response.status_code != 200:
-        logger.error(f"❌ Gagal mengambil data harga untuk '{query}'")
-        return None
+        logger.error(f"❌ Gagal mengambil data harga dari Google untuk '{query}'")
+        return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-    prices = set()  # Gunakan set untuk menghindari duplikasi
+    prices = set()
 
-    # Coba cari harga dari Google Shopping jika ada
+    # Coba Google Shopping
     shopping_results = soup.find_all("div", class_="sh-dgr__content")
     for result in shopping_results:
-        price_text = result.get_text()
-        match = re.findall(r"Rp ?[\d.,]+", price_text)  # Cari format harga
-        prices.update(match)
+        prices.update(extract_prices(result.get_text()))
 
-    # Jika Google Shopping tidak ada, gunakan hasil biasa
+    # Jika Google Shopping tidak ada, ambil dari snippet biasa
     if not prices:
         for result in soup.find_all("div", class_="BNeawe iBp4i AP7Wnd"):
-            price_text = result.text
-            match = re.findall(r"Rp ?[\d.,]+", price_text)
-            prices.update(match)
+            prices.update(extract_prices(result.text))
 
-    final_prices = list(prices)[:5]  # Ambil maksimal 5 harga unik
-    logger.info(f"📊 Harga ditemukan untuk '{query}': {final_prices}")
-    return final_prices if final_prices else None
+    return list(prices)[:5]
+
+def scrape_tokopedia_price(query):
+    """Scraping harga dari Tokopedia"""
+    search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
+    response = requests.get(search_url, headers=HEADERS)
+
+    if response.status_code != 200:
+        logger.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    prices = set()
+
+    for result in soup.find_all("div", class_="prd_link-product-price"):
+        prices.update(extract_prices(result.get_text()))
+
+    return list(prices)[:5]
+
+def scrape_shopee_price(query):
+    """Scraping harga dari Shopee"""
+    search_url = f"https://shopee.co.id/search?keyword={query}"
+    response = requests.get(search_url, headers=HEADERS)
+
+    if response.status_code != 200:
+        logger.error(f"❌ Gagal mengambil data harga dari Shopee untuk '{query}'")
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    prices = set()
+
+    for result in soup.find_all("div", class_="vioxXd"):
+        prices.update(extract_prices(result.get_text()))
+
+    return list(prices)[:5]
+
+def scrape_bukalapak_price(query):
+    """Scraping harga dari Bukalapak"""
+    search_url = f"https://www.bukalapak.com/products?search%5Bkeywords%5D={query}"
+    response = requests.get(search_url, headers=HEADERS)
+
+    if response.status_code != 200:
+        logger.error(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    prices = set()
+
+    for result in soup.find_all("span", class_="amount"):
+        prices.update(extract_prices(result.get_text()))
+
+    return list(prices)[:5]
+
+def scrape_price(query):
+    """Menggabungkan semua sumber harga dari berbagai e-commerce"""
+    logger.info(f"🔍 Mencari harga untuk: {query}")
+
+    google_prices = scrape_google_price(query)
+    tokopedia_prices = scrape_tokopedia_price(query)
+    shopee_prices = scrape_shopee_price(query)
+    bukalapak_prices = scrape_bukalapak_price(query)
+
+    all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices
+    unique_prices = sorted(set(all_prices))  # Hilangkan duplikasi dan urutkan
+
+    logger.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
+    return unique_prices[:5] if unique_prices else None
 
 def save_price_data(question, answer):
     data = load_data(PRICE_HISTORY_FILE)
