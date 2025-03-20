@@ -68,10 +68,19 @@ def predict_google(text):
         response = requests.get(url)
         if response.status_code == 200:
             suggestions = response.json()[1]
-            logger.info(f"🔍 Prediksi Google untuk '{text}': {suggestions}")
+            
+            # Jika tidak ada saran, coba dengan kata yang lebih sedikit
+            if not suggestions and len(text.split()) > 2:
+                short_text = " ".join(text.split()[:3])
+                url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={short_text}"
+                response = requests.get(url)
+                if response.status_code == 200:
+                    suggestions = response.json()[1]
+
             return suggestions[:3] if suggestions else []
     except Exception as e:
-        logger.error(f"❌ Error saat mengambil prediksi dari Google: {e}")
+        logger.error(f"❌ Gagal mengambil prediksi Google: {e}")
+        return []
     return []
 
 def scrape_price(query):
@@ -130,7 +139,6 @@ async def inline_query(update: Update, context: CallbackContext):
 
     add_to_history(query)
 
-    # Prediksi menggunakan berbagai metode
     markov_result = predict_markov(query)
     google_results = predict_google(query)
     
@@ -155,10 +163,7 @@ async def inline_query(update: Update, context: CallbackContext):
         google_fallback = predict_google(first_word)
         predictions.extend(google_fallback[:2])
 
-    # Hapus duplikat & ambil maksimal 3 prediksi
-    predictions = list(set(predictions))[:3]
-
-    logger.info(f"📌 Prediksi akhir untuk '{query}': {predictions}")
+    predictions = list(set(predictions))[:3]  # Hilangkan duplikat dan batasi 3 hasil
 
     results = [
         InlineQueryResultArticle(
