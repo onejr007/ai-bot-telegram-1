@@ -4,13 +4,14 @@ import markovify
 import requests
 import uuid
 import logging
-
+import asyncio
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackContext
 
+# Konfigurasi Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.info("🚀 Bot sedang dimulai...")
+
 # File tempat menyimpan history chat
 CHAT_HISTORY_FILE = "chat_history.json"
 
@@ -112,7 +113,17 @@ app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
 
+# Fungsi untuk menghapus webhook sebelum polling
+async def delete_webhook():
+    logger.info("🚀 Menghapus webhook sebelum memulai polling...")
+    await app.bot.delete_webhook(drop_pending_updates=True)
 
-logger.info("✅ Bot siap! Menjalankan polling...")
+# Fungsi utama untuk menjalankan bot
+async def main():
+    await delete_webhook()
+    logger.info("✅ Webhook dihapus, memulai polling...")
+    await app.run_polling()
 
-app.run_polling()
+# Menjalankan bot
+if __name__ == "__main__":
+    asyncio.run(main())
