@@ -42,7 +42,7 @@ def train_markov():
     text_data = " ".join(data)
     return markovify.Text(text_data, state_size=2)
 
-# Fungsi untuk memprediksi teks menggunakan Markov
+# Fungsi untuk memprediksi teks menggunakan Markov (Pastikan menghasilkan 2 kata)
 def predict_markov(text):
     model = train_markov()
     if model:
@@ -63,7 +63,8 @@ def predict_google(text):
         response = requests.get(url)
         if response.status_code == 200:
             suggestions = response.json()[1]
-            return [s.split()[0] for s in suggestions if len(s.split()) > 1][:3]
+            results = [s for s in suggestions if len(s.split()) > 1]  # Pastikan minimal 2 kata
+            return results[:3]
     except:
         return []
     return []
@@ -114,8 +115,8 @@ async def inline_query(update: Update, context: CallbackContext):
     history_predictions = predict_from_history(query)
     predictions.update(history_predictions)
 
-    # Ambil maksimal 3 prediksi unik
-    final_predictions = list(predictions)[:3]
+    # Pastikan setiap hasil minimal memiliki 2 kata
+    final_predictions = [pred for pred in predictions if len(pred.split()) > 1][:3]
 
     # Jika tidak ada hasil prediksi, berikan fallback
     if not final_predictions:
