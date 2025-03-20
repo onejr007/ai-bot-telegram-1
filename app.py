@@ -99,15 +99,25 @@ def scrape_price(query):
         return None
 
     soup = BeautifulSoup(response.text, "html.parser")
-    prices = []
+    prices = set()  # Gunakan set untuk menghindari duplikasi
 
-    for result in soup.find_all("div", class_="BNeawe iBp4i AP7Wnd"):
-        price_text = result.text
-        if "Rp" in price_text:
-            prices.append(price_text)
+    # Coba cari harga dari Google Shopping jika ada
+    shopping_results = soup.find_all("div", class_="sh-dgr__content")
+    for result in shopping_results:
+        price_text = result.get_text()
+        match = re.findall(r"Rp ?[\d.,]+", price_text)  # Cari format harga
+        prices.update(match)
 
-    logger.info(f"📊 Harga ditemukan untuk '{query}': {prices}")
-    return prices[:5] if prices else None
+    # Jika Google Shopping tidak ada, gunakan hasil biasa
+    if not prices:
+        for result in soup.find_all("div", class_="BNeawe iBp4i AP7Wnd"):
+            price_text = result.text
+            match = re.findall(r"Rp ?[\d.,]+", price_text)
+            prices.update(match)
+
+    final_prices = list(prices)[:5]  # Ambil maksimal 5 harga unik
+    logger.info(f"📊 Harga ditemukan untuk '{query}': {final_prices}")
+    return final_prices if final_prices else None
 
 def save_price_data(question, answer):
     data = load_data(PRICE_HISTORY_FILE)
