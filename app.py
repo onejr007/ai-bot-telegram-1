@@ -6,11 +6,10 @@ import uuid
 import logging
 import asyncio
 import nest_asyncio
-import sys
-
 from bs4 import BeautifulSoup
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackContext
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
+from telegram import InlineQueryResultArticle, InputTextMessageContent
 
 # Terapkan nest_asyncio agar tidak error event loop
 nest_asyncio.apply()
@@ -111,48 +110,16 @@ def find_price_in_history(question):
 
 # Fungsi untuk menangani perintah `/start`
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Halo! Gunakan inline mode dengan '@NamaBot <kata>' untuk mendapatkan prediksi teks atau bertanya harga.")
+    await update.message.reply_text("Halo! Gunakan inline mode dengan '@NamaBot <kata>' untuk mendapatkan prediksi teks atau kirim pertanyaan harga dalam chat.")
 
 # Fungsi untuk menangani inline query (@bot <kata>)
 async def inline_query(update: Update, context: CallbackContext):
     query = update.inline_query.query.strip()
     if not query:
         return
-    
+
     # Simpan history agar bot belajar
     add_to_history(query)
-
-    # Cek apakah ini pertanyaan harga
-    if "harga" in query.lower():
-        cached_answer = find_price_in_history(query)
-        if cached_answer:
-            answer = cached_answer
-        else:
-            await update.inline_query.answer([
-                InlineQueryResultArticle(
-                    id=str(uuid.uuid4()),
-                    title="🔍 Mencari harga...",
-                    input_message_content=InputTextMessageContent("Tunggu Sebentar, saya sedang mencarikan data yang cocok untuk Anda."),
-                )
-            ])
-            prices = scrape_price(query)
-            if prices:
-                min_price = min(prices)
-                max_price = max(prices)
-                answer = f"Kisaran Harga: {min_price} ~ {max_price}"
-                save_price_data(query, answer)
-            else:
-                answer = "Maaf, saya tidak menemukan harga untuk barang ini."
-
-        results = [
-            InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title=f"💰 {answer}",
-                input_message_content=InputTextMessageContent(answer),
-            )
-        ]
-        await update.inline_query.answer(results)
-        return
 
     # Prediksi teks dengan berbagai metode
     markov_result = predict_markov(query)
@@ -181,6 +148,28 @@ async def inline_query(update: Update, context: CallbackContext):
     if results:
         await update.inline_query.answer(results)
 
+# Fungsi untuk menangani pertanyaan harga dalam chat
+async def handle_message(update: Update, context: CallbackContext):
+    text = update.message.text.strip().lower()
+
+    if "harga" in text:
+        await update.message.reply_text("🔍 Mencari harga...")
+
+        cached_answer = find_price_in_history(text)
+        if cached_answer:
+            answer = cached_answer
+        else:
+            prices = scrape_price(text)
+            if prices:
+                min_price = min(prices)
+                max_price = max(prices)
+                answer = f"Kisaran Harga: {min_price} ~ {max_price}"
+                save_price_data(text, answer)
+            else:
+                answer = "Maaf, saya tidak menemukan harga untuk barang ini."
+
+        await update.message.reply_text(answer)
+
 # Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -189,23 +178,17 @@ app = Application.builder().token(TOKEN).build()
 # Menambahkan handler
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Perbaikan untuk event loop asyncio
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-async def run_bot():
+# Fungsi utama untuk menjalankan bot
+async def main():
     logger.info("🚀 Menghapus webhook sebelum memulai polling...")
     await app.bot.delete_webhook()
     logger.info("✅ Webhook dihapus, memulai polling...")
+    
+    loop = asyncio.get_running_loop()
     await app.run_polling()
 
+# Jalankan bot
 if __name__ == "__main__":
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(run_bot())  # Jika event loop sudah berjalan, gunakan task
-        else:
-            loop.run_until_complete(run_bot())  # Jika belum ada event loop, jalankan langsung
-    except RuntimeError:
-        asyncio.run(run_bot())  # Jika gagal, gunakan asyncio.run() sebagai fallback
+    asyncio.run(main())
