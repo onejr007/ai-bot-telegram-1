@@ -48,17 +48,13 @@ def predict_markov(text):
     if model:
         try:
             sentence = model.make_sentence_with_start(text, strict=False)
-            return sentence if sentence else "Saya belum bisa memprediksi lanjutannya."
+            if sentence:
+                words = sentence.split()
+                if len(words) > 1:
+                    return f"{text} {words[1]}"
         except markovify.text.ParamError:
-            return "Belum ada cukup data untuk prediksi."
-    return "Belum ada cukup data untuk prediksi."
-
-# Fungsi untuk menambahkan teks baru ke history chat
-def add_to_history(text):
-    data = load_data()
-    if text not in data:
-        data.append(text)
-        save_data(data)
+            return None
+    return None
 
 # Fungsi untuk mencari prediksi dari Google Search (Scraping)
 def predict_google(text):
@@ -67,10 +63,27 @@ def predict_google(text):
         response = requests.get(url)
         if response.status_code == 200:
             suggestions = response.json()[1]
-            return suggestions[:3] if suggestions else ["Tidak ada prediksi."]
+            return [s.split()[0] for s in suggestions if len(s.split()) > 1][:3]
     except:
-        return ["Gagal mengambil prediksi dari Google."]
-    return ["Tidak ada prediksi."]
+        return []
+    return []
+
+# Fungsi untuk prediksi sederhana dari history chat
+def predict_from_history(text):
+    history = load_data()
+    results = []
+    for sentence in history:
+        words = sentence.split()
+        if len(words) > 1 and words[0] == text:
+            results.append(f"{text} {words[1]}")
+    return results[:3]
+
+# Fungsi untuk menambahkan teks baru ke history chat
+def add_to_history(text):
+    data = load_data()
+    if text not in data:
+        data.append(text)
+        save_data(data)
 
 # Fungsi untuk menangani perintah `/start`
 async def start(update: Update, context: CallbackContext):
@@ -85,30 +98,44 @@ async def inline_query(update: Update, context: CallbackContext):
     # Simpan ke history agar AI belajar
     add_to_history(query)
 
-    # Prediksi menggunakan Markov
-    markov_result = predict_markov(query)
+    # Menggabungkan prediksi dari berbagai metode
+    predictions = set()
 
-    # Prediksi menggunakan Google
-    google_results = predict_google(query)
-    google_text = "\n".join(google_results)
+    # Tambahkan prediksi dari Markov
+    markov_prediction = predict_markov(query)
+    if markov_prediction:
+        predictions.add(markov_prediction)
 
+    # Tambahkan prediksi dari Google
+    google_predictions = predict_google(query)
+    predictions.update(google_predictions)
+
+    # Tambahkan prediksi dari history chat
+    history_predictions = predict_from_history(query)
+    predictions.update(history_predictions)
+
+    # Ambil maksimal 3 prediksi unik
+    final_predictions = list(predictions)[:3]
+
+    # Jika tidak ada hasil prediksi, berikan fallback
+    if not final_predictions:
+        final_predictions = ["Tidak ada prediksi tersedia."]
+
+    # Buat hasil inline query
     results = [
         InlineQueryResultArticle(
             id=str(uuid.uuid4()),
-            title=f"Prediksi Markov: {markov_result}",
-            input_message_content=InputTextMessageContent(markov_result),
-        ),
-        InlineQueryResultArticle(
-            id=str(uuid.uuid4()),
-            title=f"Prediksi Google: {google_results[0] if google_results else 'Tidak ada prediksi'}",
-            input_message_content=InputTextMessageContent(google_results[0] if google_results else "Tidak ada prediksi"),
-        ),
+            title=pred,
+            input_message_content=InputTextMessageContent(pred),
+        )
+        for pred in final_predictions
     ]
 
     await update.inline_query.answer(results)
 
 # Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = f"https://{os.getenv('RAILWAY_STATIC_URL')}/webhook"
 
 app = Application.builder().token(TOKEN).build()
 
@@ -122,9 +149,10 @@ async def main():
     await app.bot.delete_webhook()
     logger.info("✅ Webhook dihapus, memulai polling...")
     
+    # Pastikan menggunakan event loop yang sudah berjalan
+    loop = asyncio.get_running_loop()
     await app.run_polling()
 
-# Jalankan bot dengan event loop yang sudah berjalan
+# Jalankan bot
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
