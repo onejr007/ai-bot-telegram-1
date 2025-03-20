@@ -178,8 +178,7 @@ if __name__ == "__main__":
 
     try:
         loop = asyncio.get_running_loop()
+        loop.create_task(run_bot())  # Jalankan bot sebagai task dalam event loop yang sudah ada
+        loop.run_forever()  # Pastikan event loop terus berjalan
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    loop.run_until_complete(run_bot())
+        asyncio.run(run_bot())  # Jika belum ada event loop, jalankan dengan asyncio.run()
