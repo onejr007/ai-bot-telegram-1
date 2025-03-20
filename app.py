@@ -175,12 +175,12 @@ async def inline_query(update: Update, context: CallbackContext):
     predictions = list(set(predictions))[:3]  # Hilangkan duplikat dan batasi 3 hasil
 
     logger.info(f"📌 Final Predictions: {predictions}")
-
+    
     results = [
         InlineQueryResultArticle(
             id=str(uuid.uuid4()),
             title=pred,
-            input_message_content=InputTextMessageContent(pred),
+            input_message_content=InputTextMessageContent(f"{query} {pred}"),
         )
         for pred in predictions
     ]
