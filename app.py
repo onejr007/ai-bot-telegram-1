@@ -109,7 +109,6 @@ async def inline_query(update: Update, context: CallbackContext):
 
 # Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = f"https://{os.getenv('RAILWAY_STATIC_URL')}/webhook"
 
 app = Application.builder().token(TOKEN).build()
 
@@ -123,10 +122,9 @@ async def main():
     await app.bot.delete_webhook()
     logger.info("✅ Webhook dihapus, memulai polling...")
     
-    # Pastikan menggunakan event loop yang sudah berjalan
-    loop = asyncio.get_running_loop()
     await app.run_polling()
 
-# Jalankan bot
+# Jalankan bot dengan event loop yang sudah berjalan
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
