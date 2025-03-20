@@ -65,32 +65,27 @@ def add_to_history(text):
 def predict_google(text):
     try:
         url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={text}"
-        logger.info(f"🌐 Mengirim request ke Google: {url}")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        }
         
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         if response.status_code == 200:
             suggestions = response.json()[1]
-            logger.info(f"✅ Google Suggest Hasil untuk '{text}': {suggestions}")
+            if suggestions:
+                return suggestions[:3]  # Ambil maksimal 3 hasil
             
-            # Jika tidak ada saran, coba dengan kata yang lebih sedikit
-            if not suggestions and len(text.split()) > 2:
-                short_text = " ".join(text.split()[:3])
-                url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={short_text}"
-                logger.info(f"🔄 Mengirim request ke Google (fallback): {url}")
-                
-                response = requests.get(url)
-                if response.status_code == 200:
-                    suggestions = response.json()[1]
-                    logger.info(f"✅ Google Fallback Hasil: {suggestions}")
+            # Jika tidak ada hasil, coba dengan bagian terakhir query
+            short_text = " ".join(text.split()[-2:])
+            logger.info(f"🔄 Coba query lebih pendek: {short_text}")
+            
+            response = requests.get(f"https://suggestqueries.google.com/complete/search?client=firefox&q={short_text}", headers=headers)
+            if response.status_code == 200:
+                suggestions = response.json()[1]
+                return suggestions[:3] if suggestions else []
 
-            return suggestions[:3] if suggestions else []
-        
-        else:
-            logger.error(f"❌ Gagal mengambil prediksi Google. Status Code: {response.status_code}")
-    
     except Exception as e:
         logger.error(f"❌ Gagal mengambil prediksi Google: {e}")
-        return []
     
     return []
 
@@ -153,15 +148,21 @@ async def inline_query(update: Update, context: CallbackContext):
 
     markov_result = predict_markov(query)
     google_results = predict_google(query)
-    
+
+    if not google_results:
+        logger.warning(f"⚠️ Google tidak memberikan prediksi untuk: {query}")
+
     predictions = []
 
     if markov_result:
         words = markov_result.split(" ")
         if len(words) > 1:
             predictions.append(f"{query} {words[1]}")
+    
+    logger.info(f"🔎 Prediksi Markov: {markov_result}")
 
     predictions.extend(google_results)
+    logger.info(f"🔎 Prediksi Google Ditambahkan: {google_results}")
 
     if not predictions:
         predictions.extend(get_similar_from_history(query))
@@ -171,11 +172,9 @@ async def inline_query(update: Update, context: CallbackContext):
         google_fallback = predict_google(first_word)
         predictions.extend(google_fallback[:2])
 
-    if not predictions:
-        logger.warning(f"⚠️ Tidak ada prediksi ditemukan untuk '{query}'. Menggunakan fallback.")
-        predictions.append(query)  # Kembalikan query itu sendiri jika tidak ada hasil
-
     predictions = list(set(predictions))[:3]  # Hilangkan duplikat dan batasi 3 hasil
+
+    logger.info(f"📌 Final Predictions: {predictions}")
 
     results = [
         InlineQueryResultArticle(
