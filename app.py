@@ -15,9 +15,12 @@ from telegram import InlineQueryResultArticle, InputTextMessageContent
 
 nest_asyncio.apply()
 
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
 }
+
 # Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -79,7 +82,7 @@ def predict_google(text):
             short_text = " ".join(text.split()[-2:])
             logger.info(f"🔄 Coba query lebih pendek: {short_text}")
             
-            response = requests.get(f"https://suggestqueries.google.com/complete/search?client=firefox&q={short_text}", headers=headers)
+            response = requests.get(f"https://suggestqueries.google.com/complete/search?client=firefox&q={short_text}", headers=HEADERS)
             if response.status_code == 200:
                 suggestions = response.json()[1]
                 return suggestions[:3] if suggestions else []
@@ -172,10 +175,21 @@ def scrape_price(query):
     """Menggabungkan semua sumber harga dari berbagai e-commerce"""
     logger.info(f"🔍 Mencari harga untuk: {query}")
 
+    logger.info("🔄 Scraping harga dari Google...")
     google_prices = scrape_google_price(query)
+    logger.info(f"✅ Hasil Google: {google_prices}")
+
+    logger.info("🔄 Scraping harga dari Tokopedia...")
     tokopedia_prices = scrape_tokopedia_price(query)
+    logger.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
+
+    logger.info("🔄 Scraping harga dari Shopee...")
     shopee_prices = scrape_shopee_price(query)
+    logger.info(f"✅ Hasil Shopee: {shopee_prices}")
+
+    logger.info("🔄 Scraping harga dari Bukalapak...")
     bukalapak_prices = scrape_bukalapak_price(query)
+    logger.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
 
     all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices
     unique_prices = sorted(set(all_prices))  # Hilangkan duplikasi dan urutkan
@@ -213,7 +227,7 @@ def get_similar_from_history(text, max_results=3):
     
     if similar:
         logger.info(f"🔄 Menggunakan teks yang mirip dari history chat untuk '{text}': {similar[:max_results]}")
-    
+
     return similar[:max_results]
 
 async def inline_query(update: Update, context: CallbackContext):
@@ -300,28 +314,24 @@ async def handle_message(update: Update, context: CallbackContext):
             if prices:
                 min_price = min(prices)
                 max_price = max(prices)
-                answer = f"Kisaran Harga: {min_price} ~ {max_price}"
-                save_price_data(normalized_question, answer)  # Simpan dengan pertanyaan yang sudah dinormalisasi
+                answer = f"Kisaran Harga: {min_price} - {max_price}"
+                save_price_data(normalized_question, answer)
             else:
-                answer = "Maaf, saya tidak menemukan harga untuk barang ini."
+                answer = "❌ Tidak dapat menemukan harga untuk produk tersebut."
 
         await update.message.reply_text(answer)
+    else:
+        await update.message.reply_text("Silakan ketik pertanyaan harga atau gunakan inline query untuk prediksi teks.")
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+def main():
+    app = Application.builder().token(TOKEN).build()
 
-app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(InlineQueryHandler(inline_query))
+    app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(InlineQueryHandler(inline_query))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-async def main():
-    logger.info("🚀 Menghapus webhook sebelum memulai polling...")
-    await app.bot.delete_webhook()
-    logger.info("✅ Webhook dihapus, memulai polling...")
-    
-    loop = asyncio.get_running_loop()
-    await app.run_polling()
+    logger.info("🚀 Bot Telegram sedang berjalan...")
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
