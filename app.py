@@ -34,7 +34,7 @@ def save_data(data):
 def train_markov():
     data = load_data()
     if len(data) < 3:
-        return None  # Jangan buat model jika dataset terlalu kecil
+        return None
     text_data = " ".join(data)
     return markovify.Text(text_data, state_size=2)
 
@@ -78,13 +78,9 @@ async def inline_query(update: Update, context: CallbackContext):
     if not query:
         return
     
-    # Simpan ke history agar AI belajar
     add_to_history(query)
 
-    # Prediksi menggunakan Markov
     markov_result = predict_markov(query)
-
-    # Prediksi menggunakan Google
     google_results = predict_google(query)
     google_text = "\n".join(google_results)
 
@@ -105,7 +101,6 @@ async def inline_query(update: Update, context: CallbackContext):
 
 # Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = f"https://{os.getenv('RAILWAY_STATIC_URL')}/webhook"
 
 app = Application.builder().token(TOKEN).build()
 
@@ -118,12 +113,14 @@ async def delete_webhook():
     logger.info("🚀 Menghapus webhook sebelum memulai polling...")
     await app.bot.delete_webhook(drop_pending_updates=True)
 
-# Fungsi utama untuk menjalankan bot
+# Fungsi utama untuk Railway
 async def main():
     await delete_webhook()
     logger.info("✅ Webhook dihapus, memulai polling...")
     await app.run_polling()
 
-# Menjalankan bot
+# Menjalankan bot tanpa `asyncio.run()` (untuk Railway)
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
