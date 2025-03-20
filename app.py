@@ -7,62 +7,59 @@ import logging
 import asyncio
 import nest_asyncio
 from bs4 import BeautifulSoup
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackContext
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
+from telegram import InlineQueryResultArticle, InputTextMessageContent
 
-# Terapkan nest_asyncio agar tidak error event loop
 nest_asyncio.apply()
 
-# Logging untuk debugging
+# Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# File JSON
 CHAT_HISTORY_FILE = "chat_history.json"
 PRICE_HISTORY_FILE = "price_history.json"
 
-# Fungsi untuk memuat data dari JSON
 def load_data(filename):
     if not os.path.exists(filename):
         return []
-    with open(filename, "r", encoding="utf-8") as file:
-        try:
+    try:
+        with open(filename, "r", encoding="utf-8") as file:
             return json.load(file)
-        except json.JSONDecodeError:
-            return []
+    except json.JSONDecodeError:
+        logger.error(f"❌ Gagal membaca {filename}, format JSON mungkin rusak.")
+        return []
 
-# Fungsi untuk menyimpan data ke JSON
 def save_data(filename, data):
     with open(filename, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=4, ensure_ascii=False)
 
-# Fungsi untuk melatih model Markov
 def train_markov():
     data = load_data(CHAT_HISTORY_FILE)
     if len(data) < 3:
-        return None  # Jangan buat model jika dataset terlalu kecil
+        logger.warning("⚠️ Data chat terlalu sedikit untuk melatih Markov.")
+        return None
     text_data = " ".join(data)
     return markovify.Text(text_data, state_size=2)
 
-# Fungsi untuk prediksi teks Markov
 def predict_markov(text):
     model = train_markov()
     if model:
         try:
             sentence = model.make_sentence_with_start(text, strict=False)
-            return sentence if sentence else None
+            if sentence:
+                return sentence
         except markovify.text.ParamError:
-            return None
+            logger.warning(f"⚠️ Markov gagal membuat prediksi untuk: {text}")
     return None
 
-# Fungsi untuk menambahkan teks ke history
 def add_to_history(text):
     data = load_data(CHAT_HISTORY_FILE)
     if text not in data:
         data.append(text)
         save_data(CHAT_HISTORY_FILE, data)
+        logger.info(f"📌 Menambahkan '{text}' ke history chat.")
 
-# Fungsi untuk mencari prediksi dari Google Auto Suggest
 def predict_google(text):
     try:
         url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={text}"
@@ -72,19 +69,18 @@ def predict_google(text):
             logger.info(f"🔍 Prediksi Google untuk '{text}': {suggestions}")
             return suggestions[:3] if suggestions else []
     except Exception as e:
-        logger.error(f"⚠️ Error Google Suggest: {e}")
-        return []
+        logger.error(f"❌ Error saat mengambil prediksi dari Google: {e}")
     return []
 
-# Fungsi untuk scraping harga dari berbagai sumber
 def scrape_price(query):
     search_url = f"https://www.google.com/search?q={query}+harga"
     headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(search_url, headers=headers)
-    
+
     if response.status_code != 200:
+        logger.error(f"❌ Gagal mengambil data harga untuk '{query}'")
         return None
-    
+
     soup = BeautifulSoup(response.text, "html.parser")
     prices = []
 
@@ -93,50 +89,47 @@ def scrape_price(query):
         if "Rp" in price_text:
             prices.append(price_text)
 
+    logger.info(f"📊 Harga ditemukan untuk '{query}': {prices}")
     return prices[:5] if prices else None
 
-# Fungsi untuk menyimpan jawaban harga di dataset
 def save_price_data(question, answer):
     data = load_data(PRICE_HISTORY_FILE)
     data.append({"question": question, "answer": answer})
     save_data(PRICE_HISTORY_FILE, data)
+    logger.info(f"💾 Menyimpan harga: {question} -> {answer}")
 
-# Fungsi untuk mencari jawaban harga di dataset
 def find_price_in_history(question):
     data = load_data(PRICE_HISTORY_FILE)
     for entry in data:
         if question.lower() in entry["question"].lower():
+            logger.info(f"🔄 Menggunakan harga dari history untuk '{question}'")
             return entry["answer"]
     return None
 
-# Fungsi untuk menangani perintah `/start`
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Halo! Gunakan inline mode dengan '@NamaBot <kata>' untuk mendapatkan prediksi teks atau bertanya harga.")
+    await update.message.reply_text("Gunakan inline mode dengan '@NamaBot <kata>' untuk prediksi teks atau kirim pertanyaan harga dalam chat.")
 
-# Fungsi untuk menangani inline query (@bot <kata>)
 async def inline_query(update: Update, context: CallbackContext):
     query = update.inline_query.query.strip()
     if not query:
         return
-    
+
     add_to_history(query)
 
-    # Prediksi teks dengan berbagai metode
+    # Prediksi menggunakan berbagai metode
     markov_result = predict_markov(query)
     google_results = predict_google(query)
-
+    
     predictions = []
 
-    # Gunakan prediksi dari Markov jika ada
     if markov_result:
         words = markov_result.split(" ")
         if len(words) > 1:
             predictions.append(f"{query} {words[1]}")
-
-    # Gunakan prediksi dari Google jika ada
+    
     predictions.extend(google_results)
 
-    # Jika kosong, coba ambil dari history chat
+    # Jika tidak ada hasil dari Markov & Google, gunakan history chat
     if not predictions:
         chat_history = load_data(CHAT_HISTORY_FILE)
         similar = [text for text in chat_history if text.startswith(query)]
@@ -147,59 +140,48 @@ async def inline_query(update: Update, context: CallbackContext):
 
     logger.info(f"📌 Prediksi akhir untuk '{query}': {predictions}")
 
-    # Jika pertanyaan harga, kirimkan jawaban sebagai pesan, bukan inline query
-    if "harga" in query.lower():
-        cached_answer = find_price_in_history(query)
+    results = [
+        InlineQueryResultArticle(
+            id=str(uuid.uuid4()),
+            title=pred,
+            input_message_content=InputTextMessageContent(pred),
+        )
+        for pred in predictions
+    ]
+
+    if results:
+        await update.inline_query.answer(results)
+
+async def handle_message(update: Update, context: CallbackContext):
+    text = update.message.text.strip().lower()
+
+    # Jika ini pertanyaan harga dalam chat (bukan inline query)
+    if text.startswith("harga "):
+        await update.message.reply_text("🔍 Mencari harga...")
+
+        cached_answer = find_price_in_history(text)
         if cached_answer:
             answer = cached_answer
         else:
-            await update.inline_query.answer([
-                InlineQueryResultArticle(
-                    id=str(uuid.uuid4()),
-                    title="🔍 Mencari harga...",
-                    input_message_content=InputTextMessageContent("Tunggu Sebentar, saya sedang mencarikan data yang cocok untuk Anda."),
-                )
-            ])
-            prices = scrape_price(query)
+            prices = scrape_price(text)
             if prices:
                 min_price = min(prices)
                 max_price = max(prices)
                 answer = f"Kisaran Harga: {min_price} ~ {max_price}"
-                save_price_data(query, answer)
+                save_price_data(text, answer)
             else:
                 answer = "Maaf, saya tidak menemukan harga untuk barang ini."
 
-        await update.inline_query.answer([
-            InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title=f"💰 {answer}",
-                input_message_content=InputTextMessageContent(answer),
-            )
-        ])
-        return
+        await update.message.reply_text(answer)
 
-    # Jika prediksi tersedia, tampilkan hasil inline query
-    if predictions:
-        results = [
-            InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title=pred,
-                input_message_content=InputTextMessageContent(pred),
-            )
-            for pred in predictions
-        ]
-        await update.inline_query.answer(results)
-
-# Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 app = Application.builder().token(TOKEN).build()
 
-# Menambahkan handler
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Fungsi utama untuk menjalankan bot
 async def main():
     logger.info("🚀 Menghapus webhook sebelum memulai polling...")
     await app.bot.delete_webhook()
@@ -208,6 +190,5 @@ async def main():
     loop = asyncio.get_running_loop()
     await app.run_polling()
 
-# Jalankan bot
 if __name__ == "__main__":
     asyncio.run(main())
