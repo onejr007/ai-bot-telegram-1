@@ -2,9 +2,9 @@ import json
 import os
 import markovify
 import requests
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, InlineQueryHandler, CallbackContext
 import uuid
+from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
+from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackContext
 
 # File tempat menyimpan history chat
 CHAT_HISTORY_FILE = "chat_history.json"
@@ -27,8 +27,8 @@ def save_data(data):
 # Fungsi untuk melatih model Markov
 def train_markov():
     data = load_data()
-    if not data:
-        return None  # Jangan buat model jika dataset kosong
+    if len(data) < 3:
+        return None  # Jangan buat model jika dataset terlalu kecil
     text_data = " ".join(data)
     return markovify.Text(text_data, state_size=2)
 
@@ -64,7 +64,7 @@ def predict_google(text):
 
 # Fungsi untuk menangani perintah `/start`
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Halo! Ketik '@NamaBot <kata>' untuk mendapatkan prediksi teks secara otomatis.")
+    await update.message.reply_text("Halo! Gunakan inline mode dengan '@NamaBot <kata>' untuk mendapatkan prediksi teks.")
 
 # Fungsi untuk menangani inline query (@bot <kata>)
 async def inline_query(update: Update, context: CallbackContext):
@@ -99,12 +99,22 @@ async def inline_query(update: Update, context: CallbackContext):
 
 # Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = f"https://{os.getenv('RAILWAY_STATIC_URL')}/webhook"
+
 app = Application.builder().token(TOKEN).build()
 
-# Menambahkan command handler
+# Menambahkan handler
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
 
-# Menjalankan bot
-print("Bot sedang berjalan...")
-app.run_polling()
+# Menjalankan bot dengan Webhook (bukan polling)
+async def set_webhook():
+    await app.bot.set_webhook(WEBHOOK_URL)
+
+print(f"Setting webhook to {WEBHOOK_URL}...")
+
+app.run_webhook(
+    listen="0.0.0.0",
+    port=int(os.getenv("PORT", 5000)),
+    webhook_url=WEBHOOK_URL,
+)
