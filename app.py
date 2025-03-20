@@ -180,7 +180,11 @@ def scrape_price(query):
     all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices
     unique_prices = sorted(set(all_prices))  # Hilangkan duplikasi dan urutkan
 
-    logger.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
+    if not unique_prices:
+        logger.warning(f"❌ Tidak menemukan harga untuk '{query}'")
+    else:
+        logger.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
+
     return unique_prices[:5] if unique_prices else None
 
 def save_price_data(question, answer):
