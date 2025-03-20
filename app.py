@@ -137,6 +137,7 @@ async def inline_query(update: Update, context: CallbackContext):
     if not query:
         return
 
+    logger.info(f"📩 Inline Query Diterima: '{query}'")
     add_to_history(query)
 
     markov_result = predict_markov(query)
@@ -144,24 +145,24 @@ async def inline_query(update: Update, context: CallbackContext):
     
     predictions = []
 
-    # Jika Markov berhasil, gunakan hasilnya
     if markov_result:
         words = markov_result.split(" ")
         if len(words) > 1:
             predictions.append(f"{query} {words[1]}")
-    
-    # Jika Google memberikan hasil, tambahkan ke prediksi
+
     predictions.extend(google_results)
 
-    # Jika Markov & Google gagal, coba cari di history chat
     if not predictions:
         predictions.extend(get_similar_from_history(query))
 
-    # Jika masih kosong, coba cari prediksi dari kata pertama query
     if not predictions:
         first_word = query.split(" ")[0]
         google_fallback = predict_google(first_word)
         predictions.extend(google_fallback[:2])
+
+    if not predictions:
+        logger.warning(f"⚠️ Tidak ada prediksi ditemukan untuk '{query}'. Menggunakan fallback.")
+        predictions.append(query)  # Kembalikan query itu sendiri jika tidak ada hasil
 
     predictions = list(set(predictions))[:3]  # Hilangkan duplikat dan batasi 3 hasil
 
@@ -175,7 +176,7 @@ async def inline_query(update: Update, context: CallbackContext):
     ]
 
     if results:
-        await update.inline_query.answer(results)
+        await update.inline_query.answer(results, cache_time=1)
 
 def normalize_price_question(text):
     """
