@@ -1,96 +1,110 @@
-import os
 import json
+import os
 import markovify
 import requests
-from bs4 import BeautifulSoup
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, CallbackContext, CommandHandler
+from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, InlineQueryHandler, CallbackContext
+import uuid
 
-# Ambil token dari Environment Variables
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# File tempat menyimpan history chat
+CHAT_HISTORY_FILE = "chat_history.json"
 
-# Pastikan token tersedia
-if not TELEGRAM_BOT_TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN tidak ditemukan di environment variables!")
-
-# Path ke dataset JSON
-DATA_FILE = "chat_history.json"
-
-# Fungsi untuk memuat atau membuat dataset JSON
+# Fungsi untuk memuat data dari JSON
 def load_data():
-    if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "w") as f:
-            json.dump([], f)
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    if not os.path.exists(CHAT_HISTORY_FILE):
+        return []
+    with open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as file:
+        try:
+            return json.load(file)
+        except json.JSONDecodeError:
+            return []
 
-# Fungsi untuk menyimpan chat ke dataset JSON
+# Fungsi untuk menyimpan data ke JSON
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    with open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
 
-# Fungsi untuk melatih model Markov dari dataset
+# Fungsi untuk melatih model Markov
 def train_markov():
     data = load_data()
+    if not data:
+        return None  # Jangan buat model jika dataset kosong
     text_data = " ".join(data)
-    if text_data:
-        return markovify.Text(text_data, state_size=2)
-    return None
+    return markovify.Text(text_data, state_size=2)
 
-# Fungsi untuk mendapatkan prediksi teks dengan Markov
+# Fungsi untuk memprediksi teks menggunakan Markov
 def predict_markov(text):
     model = train_markov()
     if model:
-        sentence = model.make_sentence_with_start(text, strict=False)
-        return sentence if sentence else "Saya tidak bisa memprediksi lanjutannya."
+        try:
+            sentence = model.make_sentence_with_start(text, strict=False)
+            return sentence if sentence else "Saya belum bisa memprediksi lanjutannya."
+        except markovify.text.ParamError:
+            return "Belum ada cukup data untuk prediksi."
     return "Belum ada cukup data untuk prediksi."
 
-# Fungsi untuk scraping Google Search untuk prediksi
-def predict_google(query):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    search_url = f"https://www.google.com/search?q={query}"
-    response = requests.get(search_url, headers=headers)
-
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, "html.parser")
-        results = soup.find_all("h3")
-        if results:
-            return results[0].text
-    return "Tidak ada hasil dari Google."
-
-# Fungsi utama untuk menangani pesan
-async def handle_message(update: Update, context: CallbackContext):
-    text = update.message.text
-    chat_id = update.message.chat_id
-
-    # Simpan chat ke JSON untuk training Markov
+# Fungsi untuk menambahkan teks baru ke history chat
+def add_to_history(text):
     data = load_data()
-    data.append(text)
-    save_data(data)
+    if text not in data:
+        data.append(text)
+        save_data(data)
 
-    # Jika pesan diawali "Coba ", prediksi teks
-    if text.lower().startswith("coba "):
-        input_text = text[5:].strip()
-        markov_result = predict_markov(input_text)
-        google_result = predict_google(input_text)
+# Fungsi untuk mencari prediksi dari Google Search (Scraping)
+def predict_google(text):
+    try:
+        url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={text}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            suggestions = response.json()[1]
+            return suggestions[:3] if suggestions else ["Tidak ada prediksi."]
+    except:
+        return ["Gagal mengambil prediksi dari Google."]
+    return ["Tidak ada prediksi."]
 
-        reply = f"**Prediksi Markov:** {markov_result}\n**Prediksi Google:** {google_result}"
-        await update.message.reply_text(reply)
-    else:
-        await update.message.reply_text("Ketik 'Coba <kata>' untuk mendapatkan prediksi teks.")
-
-# Fungsi untuk perintah `/start`
+# Fungsi untuk menangani perintah `/start`
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Halo! Ketik 'Coba <kata>' untuk mendapatkan prediksi teks.")
+    await update.message.reply_text("Halo! Ketik '@NamaBot <kata>' untuk mendapatkan prediksi teks secara otomatis.")
+
+# Fungsi untuk menangani inline query (@bot <kata>)
+async def inline_query(update: Update, context: CallbackContext):
+    query = update.inline_query.query
+    if not query:
+        return
+    
+    # Simpan ke history agar AI belajar
+    add_to_history(query)
+
+    # Prediksi menggunakan Markov
+    markov_result = predict_markov(query)
+
+    # Prediksi menggunakan Google
+    google_results = predict_google(query)
+    google_text = "\n".join(google_results)
+
+    results = [
+        InlineQueryResultArticle(
+            id=str(uuid.uuid4()),
+            title=f"Prediksi Markov: {markov_result}",
+            input_message_content=InputTextMessageContent(markov_result),
+        ),
+        InlineQueryResultArticle(
+            id=str(uuid.uuid4()),
+            title=f"Prediksi Google: {google_results[0] if google_results else 'Tidak ada prediksi'}",
+            input_message_content=InputTextMessageContent(google_results[0] if google_results else "Tidak ada prediksi"),
+        ),
+    ]
+
+    await update.inline_query.answer(results)
 
 # Konfigurasi bot Telegram
-app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+app = Application.builder().token(TOKEN).build()
 
-# Tambahkan handler untuk pesan dan perintah
+# Menambahkan command handler
 app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(InlineQueryHandler(inline_query))
 
-# Jalankan bot
-if __name__ == "__main__":
-    print("Bot Telegram sedang berjalan...")
-    app.run_polling()
+# Menjalankan bot
+print("Bot sedang berjalan...")
+app.run_polling()
