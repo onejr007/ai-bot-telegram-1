@@ -107,14 +107,6 @@ app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
 
-# Menjalankan bot dengan Webhook (bukan polling)
-async def set_webhook():
-    await app.bot.set_webhook(WEBHOOK_URL)
+print("Bot is running with polling...")
 
-print(f"Setting webhook to {WEBHOOK_URL}...")
-
-app.run_webhook(
-    listen="0.0.0.0",
-    port=int(os.getenv("PORT", 5000)),
-    webhook_url=WEBHOOK_URL,
-)
+app.run_polling()
