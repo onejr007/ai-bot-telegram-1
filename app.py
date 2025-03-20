@@ -3,9 +3,14 @@ import os
 import markovify
 import requests
 import uuid
+import logging
+
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackContext
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.info("🚀 Bot sedang dimulai...")
 # File tempat menyimpan history chat
 CHAT_HISTORY_FILE = "chat_history.json"
 
@@ -107,6 +112,7 @@ app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
 
-print("Bot is running with polling...")
+
+logger.info("✅ Bot siap! Menjalankan polling...")
 
 app.run_polling()
