@@ -168,11 +168,18 @@ async def main():
 
 # Jalankan bot
 if __name__ == "__main__":
+    import sys
+
+    if sys.platform == "win32":
+        # Windows tidak selalu mendukung event loop dengan run_until_complete()
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    async def run_bot():
+        await main()
+
     try:
-        asyncio.get_running_loop()
+        asyncio.run(run_bot())
     except RuntimeError:
-        # Jika tidak ada event loop, jalankan `asyncio.run()`
-        asyncio.run(main())
-    else:
-        # Jika event loop sudah berjalan (Railway), jalankan `main()` langsung
-        asyncio.create_task(main())
+        loop = asyncio.get_event_loop()
+        loop.create_task(run_bot())
+        loop.run_forever()
