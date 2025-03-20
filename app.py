@@ -171,15 +171,15 @@ if __name__ == "__main__":
     import sys
 
     if sys.platform == "win32":
-        # Windows tidak selalu mendukung event loop dengan run_until_complete()
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     async def run_bot():
         await main()
 
     try:
-        asyncio.run(run_bot())
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.create_task(run_bot())
-        loop.run_forever()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(run_bot())
