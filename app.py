@@ -92,7 +92,7 @@ async def start(update: Update, context: CallbackContext):
 
 # Fungsi untuk menangani inline query (@bot <kata>)
 async def inline_query(update: Update, context: CallbackContext):
-    query = update.inline_query.query
+    query = update.inline_query.query.strip()
     if not query:
         return
     
