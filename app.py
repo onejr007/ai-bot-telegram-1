@@ -6,6 +6,8 @@ import uuid
 import logging
 import asyncio
 import nest_asyncio
+import re
+
 from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
@@ -109,6 +111,18 @@ def find_price_in_history(question):
 async def start(update: Update, context: CallbackContext):
     await update.message.reply_text("Gunakan inline mode dengan '@NamaBot <kata>' untuk prediksi teks atau kirim pertanyaan harga dalam chat.")
 
+def get_similar_from_history(text, max_results=3):
+    """
+    Mencari teks yang mirip dalam history chat jika Markov dan Google gagal.
+    """
+    data = load_data(CHAT_HISTORY_FILE)
+    similar = [item for item in data if text in item and item != text]
+    
+    if similar:
+        logger.info(f"🔄 Menggunakan teks yang mirip dari history chat untuk '{text}': {similar[:max_results]}")
+    
+    return similar[:max_results]
+
 async def inline_query(update: Update, context: CallbackContext):
     query = update.inline_query.query.strip()
     if not query:
@@ -122,18 +136,24 @@ async def inline_query(update: Update, context: CallbackContext):
     
     predictions = []
 
+    # Jika Markov berhasil, gunakan hasilnya
     if markov_result:
         words = markov_result.split(" ")
         if len(words) > 1:
             predictions.append(f"{query} {words[1]}")
     
+    # Jika Google memberikan hasil, tambahkan ke prediksi
     predictions.extend(google_results)
 
-    # Jika tidak ada hasil dari Markov & Google, gunakan history chat
+    # Jika Markov & Google gagal, coba cari di history chat
     if not predictions:
-        chat_history = load_data(CHAT_HISTORY_FILE)
-        similar = [text for text in chat_history if text.startswith(query)]
-        predictions.extend(similar[:3])
+        predictions.extend(get_similar_from_history(query))
+
+    # Jika masih kosong, coba cari prediksi dari kata pertama query
+    if not predictions:
+        first_word = query.split(" ")[0]
+        google_fallback = predict_google(first_word)
+        predictions.extend(google_fallback[:2])
 
     # Hapus duplikat & ambil maksimal 3 prediksi
     predictions = list(set(predictions))[:3]
@@ -152,23 +172,42 @@ async def inline_query(update: Update, context: CallbackContext):
     if results:
         await update.inline_query.answer(results)
 
+def normalize_price_question(text):
+    """
+    Menyederhanakan pertanyaan harga agar formatnya sama
+    """
+    text = text.lower()
+    
+    # Hilangkan kata-kata tanya yang tidak mempengaruhi pencarian
+    text = re.sub(r"\b(coba carikan|berapa|tolong cari|tolong carikan|mohon carikan)\b", "", text).strip()
+    
+    # Pastikan format baku menggunakan "harga <produk>"
+    if not text.startswith("harga "):
+        text = "harga " + text
+
+    return text
+
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
 
     # Jika ini pertanyaan harga dalam chat (bukan inline query)
-    if text.startswith("harga "):
+    if text.startswith("harga ") or any(x in text for x in ["berapa harga", "coba carikan harga"]):
         await update.message.reply_text("🔍 Mencari harga...")
 
-        cached_answer = find_price_in_history(text)
+        # Normalisasi pertanyaan
+        normalized_question = normalize_price_question(text)
+
+        # Cek apakah harga sudah pernah dicari sebelumnya
+        cached_answer = find_price_in_history(normalized_question)
         if cached_answer:
             answer = cached_answer
         else:
-            prices = scrape_price(text)
+            prices = scrape_price(normalized_question)
             if prices:
                 min_price = min(prices)
                 max_price = max(prices)
                 answer = f"Kisaran Harga: {min_price} ~ {max_price}"
-                save_price_data(text, answer)
+                save_price_data(normalized_question, answer)  # Simpan dengan pertanyaan yang sudah dinormalisasi
             else:
                 answer = "Maaf, saya tidak menemukan harga untuk barang ini."
 
