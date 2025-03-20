@@ -5,10 +5,14 @@ import requests
 import uuid
 import logging
 import asyncio
+import nest_asyncio
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackContext
 
-# Konfigurasi Logging
+# Terapkan nest_asyncio agar tidak terjadi error event loop
+nest_asyncio.apply()
+
+# Logging untuk debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -34,7 +38,7 @@ def save_data(data):
 def train_markov():
     data = load_data()
     if len(data) < 3:
-        return None
+        return None  # Jangan buat model jika dataset terlalu kecil
     text_data = " ".join(data)
     return markovify.Text(text_data, state_size=2)
 
@@ -78,9 +82,13 @@ async def inline_query(update: Update, context: CallbackContext):
     if not query:
         return
     
+    # Simpan ke history agar AI belajar
     add_to_history(query)
 
+    # Prediksi menggunakan Markov
     markov_result = predict_markov(query)
+
+    # Prediksi menggunakan Google
     google_results = predict_google(query)
     google_text = "\n".join(google_results)
 
@@ -101,6 +109,7 @@ async def inline_query(update: Update, context: CallbackContext):
 
 # Konfigurasi bot Telegram
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = f"https://{os.getenv('RAILWAY_STATIC_URL')}/webhook"
 
 app = Application.builder().token(TOKEN).build()
 
@@ -108,19 +117,16 @@ app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query))
 
-# Fungsi untuk menghapus webhook sebelum polling
-async def delete_webhook():
-    logger.info("🚀 Menghapus webhook sebelum memulai polling...")
-    await app.bot.delete_webhook(drop_pending_updates=True)
-
-# Fungsi utama untuk Railway
+# Fungsi utama untuk menjalankan bot
 async def main():
-    await delete_webhook()
+    logger.info("🚀 Menghapus webhook sebelum memulai polling...")
+    await app.bot.delete_webhook()
     logger.info("✅ Webhook dihapus, memulai polling...")
+    
+    # Pastikan menggunakan event loop yang sudah berjalan
+    loop = asyncio.get_running_loop()
     await app.run_polling()
 
-# Menjalankan bot tanpa `asyncio.run()` (untuk Railway)
+# Jalankan bot
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
+    asyncio.run(main())
