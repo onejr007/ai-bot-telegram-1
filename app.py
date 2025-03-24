@@ -121,6 +121,7 @@ async def scrape_tokopedia_price(query):
     query = normalize_price_query(query)  # Gunakan query yang sudah diperbaiki
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
+    logging.info(f"Link Tokped : '{search_url}'")
 
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
@@ -151,7 +152,7 @@ async def scrape_tokopedia_price(query):
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            if price_int >= 100000:  # Hanya ambil harga yang masuk akal (minimal Rp100.000)
+            if 500000 <= price_int <= 100000000:  # Pastikan harga masuk akal
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
@@ -175,7 +176,7 @@ async def scrape_shopee_price(query):
     """Scraping harga dari Shopee dengan pencarian berbasis teks (bukan class selector)."""
     search_url = f"https://www.shopee.co.id/search?keyword={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
-    logging.info(f"Link Tokped : '{search_url}'")
+    logging.info(f"Link Shopee : '{search_url}'")
 
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Shopee untuk '{query}'")
