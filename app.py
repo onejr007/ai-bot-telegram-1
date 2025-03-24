@@ -184,7 +184,7 @@ async def scrape_shopee_price(query):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-    price_elements = soup.select("span._1d9_77")  # Selector harga Shopee
+    price_elements = soup.select("span.kP+span")  # Selector harga Shopee
 
     raw_prices = [price.get_text() for price in price_elements]
     logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
@@ -240,14 +240,8 @@ async def scrape_bukalapak_price(query):
 
     logging.info(f"🔍 Harga mentah ditemukan di Bukalapak untuk '{query}': {raw_prices}")
 
-    valid_prices = []
-    invalid_prices = []
-
-    for price in raw_prices:
-        if 500000 <= price <= 50000000:
-            valid_prices.append(price)
-        else:
-            invalid_prices.append(price)
+    valid_prices = [p for p in raw_prices if 500000 <= p <= 50000000]
+    invalid_prices = list(set(raw_prices) - set(valid_prices))
 
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
@@ -312,22 +306,7 @@ async def scrape_digimap_price(query):
     raw_prices = [price.get_text() for price in price_elements]
     logging.info(f"🔍 Harga mentah ditemukan di Digimap untuk '{query}': {raw_prices}")
 
-    valid_prices = []
-    invalid_prices = []
-
-    for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price)
-        try:
-            price_int = int(price_cleaned)
-            if 5000000 <= price_int <= 100000000:
-                valid_prices.append(price_int)
-            else:
-                invalid_prices.append(price_int)
-        except ValueError:
-            invalid_prices.append(price_cleaned)
-
-    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
-    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+    valid_prices = [int(re.sub(r"[^\d]", "", price)) for price in raw_prices if 500000 <= int(re.sub(r"[^\d]", "", price)) <= 50000000]
 
     if valid_prices:
         best_price = min(valid_prices)
