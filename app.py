@@ -382,6 +382,15 @@ def normalize_price_query(text):
     if text in ["hp", "laptop", "gpu", "pc", "handphone", "smartphone", "console"]:
         text += " terbaru"  # Ubah "hp" menjadi "hp terbaru" agar lebih masuk akal
 
+    if text in ["ip", "ipun", "ipon", "ipin"]:
+        text = text.replace("ip ", "iphone ")
+        text = text.replace("ipun ", "iphone ")
+        text = text.replace("ipon ", "iphone ")
+        text = text.replace("ipin ", "iphone ")
+
+    # Hilangkan spasi berlebih
+    text = " ".join(text.split())
+
     return text.strip()
 
 async def handle_message(update: Update, context: CallbackContext):
