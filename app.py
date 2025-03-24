@@ -120,7 +120,7 @@ async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia berdasarkan teks 'Rp', hanya ambil harga valid"""
     query = normalize_price_query(query)  # Gunakan query yang sudah diperbaiki
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
-    response = requests.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
+    response = requests.get(search_url, headers=HEADERS)
     logging.info(f"Link Tokped : '{search_url}'")
 
     if response.status_code != 200:
