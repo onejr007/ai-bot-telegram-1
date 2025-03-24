@@ -311,6 +311,18 @@ def get_similar_from_history(text, max_results=3):
 
     return similar[:max_results]
 
+def merge_prediction(query, prediction):
+    """Menggabungkan query dengan prediksi tanpa duplikasi kata."""
+    query_words = query.split()
+    pred_words = prediction.split()
+
+    # Jika prediksi adalah kelanjutan dari query, cukup gabungkan
+    if pred_words[0] in query_words:  
+        return " ".join(query_words + pred_words[1:])  
+
+    # Jika prediksi benar-benar berbeda, gunakan prediksi secara langsung
+    return prediction
+
 async def inline_query(update: Update, context: CallbackContext):
     query = update.inline_query.query.strip()
     if not query:
@@ -353,10 +365,11 @@ async def inline_query(update: Update, context: CallbackContext):
         InlineQueryResultArticle(
             id=str(uuid.uuid4()),
             title=pred,
-            input_message_content=InputTextMessageContent(f"{query} {pred}"),
+            input_message_content=InputTextMessageContent(merge_prediction(query, pred)),  
         )
         for pred in predictions
     ]
+
 
     if results:
         await update.inline_query.answer(results, cache_time=1)
