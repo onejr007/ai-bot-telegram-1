@@ -14,6 +14,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram import InlineQueryResultArticle, InputTextMessageContent
 from collections import Counter
+from requests_html import AsyncHTMLSession
 
 nest_asyncio.apply()
 
@@ -173,38 +174,28 @@ async def scrape_tokopedia_price(query):
     return []
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee menggunakan parsing HTML langsung."""
+    """Scraping harga dari Shopee menggunakan session browser untuk memproses JavaScript."""
     query = normalize_price_query(query)
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '+')}"
-    response = requests.get(search_url, headers=HEADERS, timeout=10)
+    
+    session = AsyncHTMLSession()
+    response = await session.get(search_url)
+    await response.html.arender(timeout=10)
     logging.info(f"Link Shopee : '{search_url}'")
 
-    if response.status_code != 200:
-        logging.error(f"❌ Gagal mengambil data harga dari Shopee untuk '{query}'")
-        return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    price_elements = soup.select("span.kP+span")  # Selector harga Shopee
-
-    raw_prices = [price.get_text() for price in price_elements]
+    # Ambil elemen harga dengan XPath
+    raw_prices = response.html.xpath("//span[contains(@class, 'kP+span')]/text()")
     logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
 
     valid_prices = []
-    invalid_prices = []
-
     for price in raw_prices:
         price_cleaned = re.sub(r"[^\d]", "", price)
         try:
             price_int = int(price_cleaned)
             if 500000 <= price_int <= 50000000:
                 valid_prices.append(price_int)
-            else:
-                invalid_prices.append(price_int)
         except ValueError:
-            invalid_prices.append(price_cleaned)
-
-    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
-    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+            continue
 
     if valid_prices:
         best_price = min(valid_prices)
@@ -215,9 +206,9 @@ async def scrape_shopee_price(query):
     return []
 
 async def scrape_bukalapak_price(query):
-    """Scraping harga dari Bukalapak menggunakan JSON parsing."""
+    """Scraping harga dari Bukalapak menggunakan JSON API."""
     query = normalize_price_query(query)
-    search_url = f"https://www.bukalapak.com/products?search%5Bkeywords%5D={query.replace(' ', '+')}"
+    search_url = f"https://api.bukalapak.com/multistrategy-products?keywords={query.replace(' ', '+')}&limit=10"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
     logging.info(f"Link Bukalapak : '{search_url}'")
 
@@ -225,18 +216,13 @@ async def scrape_bukalapak_price(query):
         logging.error(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
         return []
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    script_tag = soup.find("script", string=re.compile('"price":'))
-    raw_prices = []
-
-    if script_tag:
-        json_text = re.search(r"({.*})", script_tag.string)
-        if json_text:
-            try:
-                json_data = json.loads(json_text.group(1))
-                raw_prices = [int(product["price"]) for product in json_data["data"]["products"]]
-            except Exception as e:
-                logging.error(f"⚠️ Gagal memproses JSON Bukalapak: {e}")
+    try:
+        data = response.json()
+        products = data.get("data", {}).get("products", [])
+        raw_prices = [int(product["price"]) for product in products]
+    except Exception as e:
+        logging.error(f"⚠️ Gagal memproses JSON Bukalapak: {e}")
+        return []
 
     logging.info(f"🔍 Harga mentah ditemukan di Bukalapak untuk '{query}': {raw_prices}")
 
@@ -255,7 +241,7 @@ async def scrape_bukalapak_price(query):
     return []
 
 async def scrape_blibli_price(query):
-    """Scraping harga dari Blibli menggunakan endpoint API yang benar."""
+    """Scraping harga dari Blibli menggunakan JSON API."""
     query = normalize_price_query(query)
     search_url = f"https://www.blibli.com/backend/search/products?searchTerm={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
@@ -276,10 +262,6 @@ async def scrape_blibli_price(query):
     logging.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
 
     valid_prices = [p for p in raw_prices if 500000 <= p <= 50000000]
-    invalid_prices = list(set(raw_prices) - set(valid_prices))
-
-    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
-    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
     if valid_prices:
         best_price = min(valid_prices)
