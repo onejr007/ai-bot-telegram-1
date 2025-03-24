@@ -152,7 +152,7 @@ async def scrape_tokopedia_price(query):
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            if 500000 <= price_int <= 100000000:  # Pastikan harga masuk akal
+            if 5000000 <= price_int <= 100000000:  # Pastikan harga masuk akal untuk HP flagship
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
