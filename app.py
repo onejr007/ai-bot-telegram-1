@@ -129,20 +129,25 @@ async def scrape_tokopedia_price(query):
     for price in raw_prices:
         price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
 
-        # Hanya ambil angka sebelum titik terakhir untuk menghindari angka tambahan
+        # Ambil hanya angka sebelum titik terakhir untuk menghindari angka tambahan
         if '.' in price_cleaned:
-            price_cleaned = price_cleaned.rsplit('.', 1)[0]
+            parts = price_cleaned.split('.')
+            if len(parts[-1]) <= 3:  # Jika bagian terakhir hanya 3 digit atau kurang, anggap sebagai ribuan
+                price_cleaned = '.'.join(parts[:-1])
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            valid_prices.append(price_int)
+            if price_int >= 100000:  # Hanya ambil harga yang masuk akal (minimal Rp100.000)
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
         except ValueError:
             invalid_prices.append(price_cleaned)
 
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ Gunakan metode pencarian harga terbanyak (mode) untuk akurasi lebih tinggi
+    # 4️⃣ Gunakan metode pencarian harga paling umum (mode) untuk akurasi lebih tinggi
     if valid_prices:
         most_common_price = Counter(valid_prices).most_common(1)[0][0]  # Ambil harga yang paling sering muncul
 
