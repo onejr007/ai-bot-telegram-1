@@ -148,22 +148,50 @@ async def scrape_tokopedia_price(query):
     return []
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee dengan fallback selector."""
+    """Scraping harga dari Shopee dengan pencarian berbasis teks (bukan class selector)."""
     search_url = f"https://shopee.co.id/search?keyword={query}"
     response = requests.get(search_url, headers=HEADERS)
+
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Shopee untuk '{query}'")
         return []
+
     soup = BeautifulSoup(response.text, "html.parser")
-    prices = set()
-    selectors = [
-        "div.xrnzAF span.wNNZR",
-        "div._1d9_77"  # alternatif jika struktur berubah
-    ]
-    for sel in selectors:
-        for result in soup.select(sel):
-            prices.update(extract_prices(result.get_text()))
-    return list(prices)[:5]
+
+    # 1️⃣ Ambil semua teks dari halaman
+    all_text = soup.get_text()
+
+    # 2️⃣ Cari semua harga dengan regex
+    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+
+    logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
+
+    # 3️⃣ Bersihkan harga yang salah dan pastikan format benar
+    valid_prices = []
+    invalid_prices = []
+
+    for price in raw_prices:
+        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())  # Hapus Rp dan karakter lain
+        try:
+            price_int = int(price_cleaned)  # Konversi ke integer
+            if 500000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
+        except ValueError:
+            invalid_prices.append(price_cleaned)
+
+    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
+    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+
+    # 4️⃣ Ambil harga termurah yang masuk akal
+    if valid_prices:
+        min_price = min(valid_prices)
+        logging.info(f"✅ Harga termurah di Shopee untuk '{query}': Rp{min_price:,}")
+        return [f"Rp{min_price:,}"]
+
+    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Shopee")
+    return []
 
 async def scrape_bukalapak_price(query):
     """Scraping harga dari Bukalapak dengan fallback selector."""
