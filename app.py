@@ -105,6 +105,7 @@ async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia berdasarkan teks 'Rp', menangkap hanya harga valid"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
     response = requests.get(search_url, headers=HEADERS)
+    logging.info(f"Link Tokped : '{search_url}'")
 
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
@@ -151,6 +152,7 @@ async def scrape_shopee_price(query):
     """Scraping harga dari Shopee dengan pencarian berbasis teks (bukan class selector)."""
     search_url = f"https://shopee.co.id/search?keyword={query}"
     response = requests.get(search_url, headers=HEADERS)
+    logging.info(f"Link Tokped : '{search_url}'")
 
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Shopee untuk '{query}'")
