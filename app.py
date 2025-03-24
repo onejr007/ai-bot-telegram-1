@@ -102,9 +102,9 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia berdasarkan pencarian teks 'Rp'"""
+    """Scraping harga dari Tokopedia berdasarkan pencarian teks 'Rp', hanya ambil harga masuk akal"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
-    response = requests.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
+    response = requests.get(search_url, headers=HEADERS)
 
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
@@ -123,7 +123,9 @@ async def scrape_tokopedia_price(query):
     for price in prices:
         price_cleaned = price.replace("Rp", "").replace(" ", "").replace(",", "").strip()
         try:
-            clean_prices.append(int(price_cleaned))  # Konversi ke integer untuk pencarian harga termurah
+            price_int = int(price_cleaned)  # Konversi ke integer
+            if 200000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
+                clean_prices.append(price_int)
         except ValueError:
             continue
 
@@ -133,7 +135,7 @@ async def scrape_tokopedia_price(query):
         logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{min_price:,}")
         return [f"Rp{min_price:,}"]
 
-    logging.warning(f"❌ Tidak menemukan harga untuk '{query}' di Tokopedia")
+    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
     return []
 
 async def scrape_shopee_price(query):
@@ -231,7 +233,7 @@ async def scrape_price(query):
     digimap_prices = await scrape_digimap_price(query)
     logging.info(f"✅ Hasil Digimap: {digimap_prices}")
 
-    all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
+    all_prices = tokopedia_prices + shopee_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
     unique_prices = sorted(set(all_prices))
 
     if not unique_prices:
