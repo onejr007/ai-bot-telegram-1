@@ -102,7 +102,7 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia berdasarkan teks 'Rp', mengambil semua harga mentah dulu sebelum filtering"""
+    """Scraping harga dari Tokopedia berdasarkan teks 'Rp', menangkap hanya harga valid"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
     response = requests.get(search_url, headers=HEADERS)
 
@@ -115,20 +115,20 @@ async def scrape_tokopedia_price(query):
     # 1️⃣ Ambil semua teks dari halaman
     all_text = soup.get_text()
 
-    # 2️⃣ Cari semua harga dengan regex (menangkap semua RpX.XXX.XXX)
-    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+    # 2️⃣ Cari semua harga yang valid menggunakan regex
+    raw_prices = re.findall(r"Rp\s?[\d]+[.,\d]*", all_text)
 
     logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
 
-    # 3️⃣ Bersihkan format harga (hilangkan spasi, ubah koma menjadi titik)
+    # 3️⃣ Bersihkan harga yang salah dan pastikan format benar
     valid_prices = []
     invalid_prices = []
     
     for price in raw_prices:
-        price_cleaned = price.replace("Rp", "").replace(" ", "").replace(",", "").strip()
+        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())  # Hapus Rp dan karakter lain
         try:
             price_int = int(price_cleaned)  # Konversi ke integer
-            if 500000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
+            if 200000 <= price_int <= 50000000:  # Hanya harga dalam rentang wajar
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
@@ -138,7 +138,7 @@ async def scrape_tokopedia_price(query):
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ Ambil harga termurah dari daftar yang valid
+    # 4️⃣ Ambil harga termurah yang masuk akal
     if valid_prices:
         min_price = min(valid_prices)
         logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{min_price:,}")
@@ -218,51 +218,39 @@ async def scrape_digimap_price(query):
             prices.update(extract_prices(result.get_text()))
     return list(prices)
 
-async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia berdasarkan teks 'Rp', menangkap hanya harga valid"""
-    search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
-    response = requests.get(search_url, headers=HEADERS)
+async def scrape_price(query):
+    """Menggabungkan semua sumber harga dari berbagai e-commerce"""
+    logging.info(f"🔍 Mencari harga untuk: {query}")
 
-    if response.status_code != 200:
-        logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
-        return []
+    logging.info("🔄 Scraping harga dari Tokopedia...")
+    tokopedia_prices = await scrape_tokopedia_price(query)
+    logging.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    logging.info("🔄 Scraping harga dari Shopee...")
+    shopee_prices = await scrape_shopee_price(query)
+    logging.info(f"✅ Hasil Shopee: {shopee_prices}")
 
-    # 1️⃣ Ambil semua teks dari halaman
-    all_text = soup.get_text()
+    logging.info("🔄 Scraping harga dari Bukalapak...")
+    bukalapak_prices = await scrape_bukalapak_price(query)
+    logging.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
 
-    # 2️⃣ Cari semua harga yang valid menggunakan regex
-    raw_prices = re.findall(r"Rp\s?[\d]+[.,\d]*", all_text)
+    logging.info("🔄 Scraping harga dari Blibli...")
+    blibli_prices = await scrape_blibli_price(query)
+    logging.info(f"✅ Hasil Blibli: {blibli_prices}")
 
-    logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
+    logging.info("🔄 Scraping harga dari Digimap...")
+    digimap_prices = await scrape_digimap_price(query)
+    logging.info(f"✅ Hasil Digimap: {digimap_prices}")
 
-    # 3️⃣ Bersihkan harga yang salah dan pastikan format benar
-    valid_prices = []
-    invalid_prices = []
-    
-    for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())  # Hapus Rp dan karakter lain
-        try:
-            price_int = int(price_cleaned)  # Konversi ke integer
-            if 200000 <= price_int <= 50000000:  # Hanya harga dalam rentang wajar
-                valid_prices.append(price_int)
-            else:
-                invalid_prices.append(price_int)
-        except ValueError:
-            invalid_prices.append(price_cleaned)
+    all_prices = tokopedia_prices + shopee_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
+    unique_prices = sorted(set(all_prices))
 
-    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
-    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+    if not unique_prices:
+        logging.warning(f"❌ Tidak menemukan harga untuk '{query}'")
+    else:
+        logging.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
 
-    # 4️⃣ Ambil harga termurah yang masuk akal
-    if valid_prices:
-        min_price = min(valid_prices)
-        logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{min_price:,}")
-        return [f"Rp{min_price:,}"]
-
-    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
-    return []
+    return unique_prices[:5] if unique_prices else None
 
 def save_price_data(question, answer):
     data = load_data(PRICE_HISTORY_FILE)
