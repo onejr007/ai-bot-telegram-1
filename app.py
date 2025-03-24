@@ -103,6 +103,7 @@ def extract_prices(text):
 
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia berdasarkan teks 'Rp', hanya ambil harga valid"""
+    query = normalize_price_query(query)  # Gunakan query yang sudah diperbaiki
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
 
@@ -125,15 +126,12 @@ async def scrape_tokopedia_price(query):
     invalid_prices = []
 
     for price in raw_prices:
-        # Hapus karakter selain angka dan titik
         price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
-
-        # Hanya ambil bagian harga sebelum tanda titik terakhir (menghilangkan angka tambahan)
-        price_cleaned = price_cleaned.rsplit(".", 1)[0]  
+        price_cleaned = price_cleaned.rsplit(".", 1)[0]  # Hanya ambil angka sebelum titik terakhir
 
         try:
-            price_int = int(price_cleaned.replace(".", ""))  # Konversi ke integer
-            if 3000000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
+            price_int = int(price_cleaned.replace(".", ""))
+            if 5000000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
@@ -143,18 +141,23 @@ async def scrape_tokopedia_price(query):
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ Ambil harga termurah yang masuk akal
+    # 4️⃣ Gunakan statistik mode untuk mendapatkan harga paling sering muncul (lebih akurat)
     if valid_prices:
-        min_price = min(valid_prices)
-        logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{min_price:,}")
-        return [f"Rp{min_price:,}"]
+        from statistics import mode
+        try:
+            best_price = mode(valid_prices)  # Harga yang paling sering muncul
+        except:
+            best_price = min(valid_prices)  # Jika tidak ada mode, ambil harga terendah
+
+        logging.info(f"✅ Harga terbaik di Tokopedia untuk '{query}': Rp{best_price:,}")
+        return [f"Rp{best_price:,}"]
 
     logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
     return []
 
 async def scrape_shopee_price(query):
     """Scraping harga dari Shopee dengan pencarian berbasis teks (bukan class selector)."""
-    search_url = f"https://shopee.co.id/search?keyword={query}"
+    search_url = f"https://www.shopee.co.id/search?keyword={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
     logging.info(f"Link Tokped : '{search_url}'")
 
@@ -383,11 +386,11 @@ async def inline_query(update: Update, context: CallbackContext):
         await update.inline_query.answer(results, cache_time=1)
 
 def normalize_price_query(text):
-    """Membersihkan query agar lebih cocok dengan format pencarian di e-commerce secara fleksibel"""
+    """Bersihkan query agar hanya berisi kata kunci produk yang valid"""
     text = text.lower().strip()
 
-    # 1️⃣ Hapus kata-kata tidak relevan dalam berbagai bahasa
-    text = re.sub(r"\b(cek|cek harga|berapa|berapa harga|berapa sih|berapa si|cari|tolong|mohon|please|find me|how much|where to buy)\b", "", text).strip()
+    # 1️⃣ Hapus kata seperti "harga", "cek harga", "berapa harga", dll.
+    text = re.sub(r"\b(harga|cek harga|berapa harga|berapa sih|berapa si)\b", "", text).strip()
 
     # 2️⃣ Hapus simbol atau karakter yang tidak diperlukan
     text = re.sub(r"[^\w\s]", "", text)  # Menghapus tanda baca seperti "?", "!", ",", dll.
@@ -396,12 +399,8 @@ def normalize_price_query(text):
     words = text.split()
     text = " ".join(sorted(set(words), key=words.index))
 
-    # 4️⃣ Koreksi kesalahan umum: ubah "ipun", "ipin", "ipon", dan "ip" menjadi "iphone"
+    # 4️⃣ Koreksi kesalahan umum (misalnya "ip" -> "iphone")
     text = re.sub(r"\b(ipun|ipin|ipon|ip)(?:\s+(\d+))?\b", r"iphone \2", text).strip()
-
-    # 5️⃣ Pastikan query tidak terlalu pendek (misalnya hanya "hp" atau "laptop")
-    if text in ["hp", "laptop", "gpu", "pc", "handphone", "smartphone", "console"]:
-        text += " terbaru"
 
     return text.strip()
 
