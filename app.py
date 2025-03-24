@@ -102,10 +102,9 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia berdasarkan teks 'Rp', menangkap hanya harga valid"""
-    search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
+    """Scraping harga dari Tokopedia berdasarkan teks 'Rp', hanya ambil harga valid"""
+    search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
-    logging.info(f"Link Tokped : '{search_url}'")
 
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
@@ -117,19 +116,24 @@ async def scrape_tokopedia_price(query):
     all_text = soup.get_text()
 
     # 2️⃣ Cari semua harga yang valid menggunakan regex
-    raw_prices = re.findall(r"Rp\s?[\d]+[.,\d]*", all_text)
+    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
 
     logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
 
     # 3️⃣ Bersihkan harga yang salah dan pastikan format benar
     valid_prices = []
     invalid_prices = []
-    
+
     for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())  # Hapus Rp dan karakter lain
+        # Hapus karakter selain angka dan titik
+        price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
+
+        # Hanya ambil bagian harga sebelum tanda titik terakhir (menghilangkan angka tambahan)
+        price_cleaned = price_cleaned.rsplit(".", 1)[0]  
+
         try:
-            price_int = int(price_cleaned)  # Konversi ke integer
-            if 200000 <= price_int <= 50000000:  # Hanya harga dalam rentang wajar
+            price_int = int(price_cleaned.replace(".", ""))  # Konversi ke integer
+            if 3000000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
