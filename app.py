@@ -21,13 +21,10 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
 ]
 
-def get_headers():
-    return {"User-Agent": random.choice(USER_AGENTS)}
-
-HEADERS = get_headers()
+HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
 # Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -105,131 +102,148 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 def scrape_google_price(query):
-    """Scraping harga dari Google Search dengan XPath yang lebih akurat."""
+    """Scraping harga dari Google Search dengan fallback selector."""
     search_url = f"https://www.google.com/search?q={query}+harga"
     response = requests.get(search_url, headers=HEADERS)
-
     if response.status_code != 200:
-        logger.error(f"❌ Gagal mengambil data harga dari Google untuk '{query}'")
+        logging.error(f"❌ Gagal mengambil data harga dari Google untuk '{query}'")
         return []
-
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
-
-    # Ambil harga dari elemen hasil pencarian
-    for result in soup.select("span[jsname='vWLAgc']"):
-        prices.update(extract_prices(result.get_text()))
-
+    # Coba beberapa selector untuk menangkap harga
+    selectors = [
+        "span[jsname='vWLAgc']",
+        "div.BNeawe.iBp4i.AP7Wnd"
+    ]
+    for sel in selectors:
+        for result in soup.select(sel):
+            prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
 def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia"""
+    """Scraping harga dari Tokopedia dengan fallback selector."""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
     response = requests.get(search_url, headers=HEADERS)
-
     if response.status_code != 200:
-        logger.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
+        logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
         return []
-
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
-
-    for result in soup.select("div[data-testid='spnSRPProdPrice']"):
-        prices.update(extract_prices(result.get_text()))
-
+    selectors = [
+        "div[data-testid='spnSRPProdPrice']",
+        "span.css-12sieg3"  # contoh alternatif; sesuaikan jika perlu
+    ]
+    for sel in selectors:
+        for result in soup.select(sel):
+            prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
 def scrape_shopee_price(query):
-    """Scraping harga dari Shopee"""
+    """Scraping harga dari Shopee dengan fallback selector."""
     search_url = f"https://shopee.co.id/search?keyword={query}"
     response = requests.get(search_url, headers=HEADERS)
-
     if response.status_code != 200:
-        logger.error(f"❌ Gagal mengambil data harga dari Shopee untuk '{query}'")
+        logging.error(f"❌ Gagal mengambil data harga dari Shopee untuk '{query}'")
         return []
-
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
-
-    for result in soup.select("div.xrnzAF span.wNNZR"):
-        prices.update(extract_prices(result.get_text()))
-
+    selectors = [
+        "div.xrnzAF span.wNNZR",
+        "div._1d9_77"  # alternatif jika struktur berubah
+    ]
+    for sel in selectors:
+        for result in soup.select(sel):
+            prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
 def scrape_bukalapak_price(query):
-    """Scraping harga dari Bukalapak"""
+    """Scraping harga dari Bukalapak dengan fallback selector."""
     search_url = f"https://www.bukalapak.com/products?search%5Bkeywords%5D={query}"
     response = requests.get(search_url, headers=HEADERS)
-
     if response.status_code != 200:
-        logger.error(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
+        logging.error(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
         return []
-
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
-
-    for result in soup.select("span.amount"):
-        prices.update(extract_prices(result.get_text()))
-
+    selectors = [
+        "span.amount",
+        "span.product-price"  # alternatif jika tersedia
+    ]
+    for sel in selectors:
+        for result in soup.select(sel):
+            prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
 def scrape_blibli_price(query):
+    """Scraping harga dari Blibli dengan fallback selector."""
     search_url = f"https://www.blibli.com/jual/{query.replace(' ', '-')}"
-    response = requests.get(search_url, headers=get_headers())
+    response = requests.get(search_url, headers=HEADERS)
+    if response.status_code != 200:
+        logging.error(f"❌ Gagal mengambil data harga dari Blibli untuk '{query}'")
+        return []
     soup = BeautifulSoup(response.text, "html.parser")
-
-    prices = []
-    for item in soup.select("div.product__price"):
-        prices.append(item.get_text())
-
-    return prices
+    prices = set()
+    selectors = [
+        "div.product__price",
+        "span.product-price"  # alternatif
+    ]
+    for sel in selectors:
+        for result in soup.select(sel):
+            prices.update(extract_prices(result.get_text()))
+    return list(prices)
 
 def scrape_digimap_price(query):
+    """Scraping harga dari Digimap dengan fallback selector."""
     search_url = f"https://www.digimap.co.id/collections/{query.replace(' ', '-')}"
-    response = requests.get(search_url, headers=get_headers())
+    response = requests.get(search_url, headers=HEADERS)
+    if response.status_code != 200:
+        logging.error(f"❌ Gagal mengambil data harga dari Digimap untuk '{query}'")
+        return []
     soup = BeautifulSoup(response.text, "html.parser")
-
-    prices = []
-    for item in soup.select("span.money"):
-        prices.append(item.get_text())
-
-    return prices
+    prices = set()
+    selectors = [
+        "span.money"
+    ]
+    for sel in selectors:
+        for result in soup.select(sel):
+            prices.update(extract_prices(result.get_text()))
+    return list(prices)
 
 def scrape_price(query):
     """Menggabungkan semua sumber harga dari berbagai e-commerce"""
-    logger.info(f"🔍 Mencari harga untuk: {query}")
+    logging.info(f"🔍 Mencari harga untuk: {query}")
 
-    logger.info("🔄 Scraping harga dari Google...")
+    logging.info("🔄 Scraping harga dari Google...")
     google_prices = scrape_google_price(query)
-    logger.info(f"✅ Hasil Google: {google_prices}")
+    logging.info(f"✅ Hasil Google: {google_prices}")
 
-    logger.info("🔄 Scraping harga dari Tokopedia...")
+    logging.info("🔄 Scraping harga dari Tokopedia...")
     tokopedia_prices = scrape_tokopedia_price(query)
-    logger.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
+    logging.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
 
-    logger.info("🔄 Scraping harga dari Shopee...")
+    logging.info("🔄 Scraping harga dari Shopee...")
     shopee_prices = scrape_shopee_price(query)
-    logger.info(f"✅ Hasil Shopee: {shopee_prices}")
+    logging.info(f"✅ Hasil Shopee: {shopee_prices}")
 
-    logger.info("🔄 Scraping harga dari Bukalapak...")
+    logging.info("🔄 Scraping harga dari Bukalapak...")
     bukalapak_prices = scrape_bukalapak_price(query)
-    logger.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
+    logging.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
 
-    logger.info("🔄 Scraping harga dari Blibli...")
+    logging.info("🔄 Scraping harga dari Blibli...")
     blibli_prices = scrape_blibli_price(query)
-    logger.info(f"✅ Hasil Blibli: {blibli_prices}")
+    logging.info(f"✅ Hasil Blibli: {blibli_prices}")
 
-    logger.info("🔄 Scraping harga dari Digimap...")
+    logging.info("🔄 Scraping harga dari Digimap...")
     digimap_prices = scrape_digimap_price(query)
-    logger.info(f"✅ Hasil Blibli: {digimap_prices}")
+    logging.info(f"✅ Hasil Digimap: {digimap_prices}")
 
-    all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices + blibli_prices + digimap_prices
-    unique_prices = sorted(set(all_prices))  # Hilangkan duplikasi dan urutkan
+    all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
+    unique_prices = sorted(set(all_prices))
 
     if not unique_prices:
-        logger.warning(f"❌ Tidak menemukan harga untuk '{query}'")
+        logging.warning(f"❌ Tidak menemukan harga untuk '{query}'")
     else:
-        logger.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
+        logging.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
 
     return unique_prices[:5] if unique_prices else None
 
@@ -312,18 +326,18 @@ async def inline_query(update: Update, context: CallbackContext):
     if results:
         await update.inline_query.answer(results, cache_time=1)
 
-def normalize_price_question(text):
-    text = text.lower()
+def normalize_price_query(text):
+    """Membersihkan query agar lebih cocok dengan format pencarian di e-commerce"""
+    text = text.lower().strip()
     
-    # Hilangkan kata-kata tanya dan "harga" yang berulang
-    text = re.sub(r"\b(harga|berapa|tolong cari|tolong carikan|mohon carikan)\b", "", text).strip()
-
-    # Jika belum ada kata "harga" di depan, tambahkan
-    if not text.startswith("harga "):
-        text = "harga " + text
+    # Hilangkan kata-kata tidak relevan
+    text = re.sub(r"\b(harga|berapa|coba carikan|tolong cari|tolong carikan|mohon carikan)\b", "", text).strip()
+    
+    # Format standar untuk produk Samsung
+    if "s25" in text and "ultra" in text:
+        text = "Samsung Galaxy S25 Ultra"
 
     return text
-
 
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
