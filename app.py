@@ -320,11 +320,16 @@ def merge_prediction(query, prediction):
     query_words = query.split()
     pred_words = prediction.split()
 
-    # Jika prediksi adalah kelanjutan dari query, cukup gabungkan
-    if pred_words[0] in query_words:  
-        return " ".join(query_words + pred_words[1:])  
+    # Jika prediksi mengandung query di awal, ambil bagian tambahan saja
+    if prediction.startswith(query):
+        return prediction  # Gunakan prediksi langsung tanpa menambahkan query lagi
+    
+    # Jika query mengandung bagian awal dari prediksi, hilangkan bagian yang berulang
+    for i in range(len(query_words)):
+        if query_words[i:] == pred_words[:len(query_words[i:])]:
+            return " ".join(query_words[:i] + pred_words)
 
-    # Jika prediksi benar-benar berbeda, gunakan prediksi secara langsung
+    # Jika tidak ada matching, gunakan prediksi secara langsung
     return prediction
 
 async def inline_query(update: Update, context: CallbackContext):
@@ -373,7 +378,6 @@ async def inline_query(update: Update, context: CallbackContext):
         )
         for pred in predictions
     ]
-
 
     if results:
         await update.inline_query.answer(results, cache_time=1)
