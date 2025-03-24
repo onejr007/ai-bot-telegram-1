@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram import InlineQueryResultArticle, InputTextMessageContent
+from collections import Counter
 
 nest_asyncio.apply()
 
@@ -134,26 +135,19 @@ async def scrape_tokopedia_price(query):
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            if 1000000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
-                valid_prices.append(price_int)
-            else:
-                invalid_prices.append(price_int)
+            valid_prices.append(price_int)
         except ValueError:
             invalid_prices.append(price_cleaned)
 
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ Ambil harga paling umum muncul agar lebih akurat
+    # 4️⃣ Gunakan metode pencarian harga terbanyak (mode) untuk akurasi lebih tinggi
     if valid_prices:
-        from statistics import mode
-        try:
-            best_price = mode(valid_prices)  # Ambil harga yang paling sering muncul
-        except:
-            best_price = min(valid_prices)  # Jika tidak ada mode, ambil harga terendah
+        most_common_price = Counter(valid_prices).most_common(1)[0][0]  # Ambil harga yang paling sering muncul
 
-        logging.info(f"✅ Harga terbaik di Tokopedia untuk '{query}': Rp{best_price:,}")
-        return [f"Rp{best_price:,}"]
+        logging.info(f"✅ Harga paling umum di Tokopedia untuk '{query}': Rp{most_common_price:,}")
+        return [f"Rp{most_common_price:,}"]
 
     logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
     return []
