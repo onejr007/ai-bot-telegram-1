@@ -101,42 +101,40 @@ def extract_prices(text):
     """Mengambil harga dari teks dengan format Rp."""
     return re.findall(r"Rp ?[\d.,]+", text)
 
-async def scrape_google_price(query):
-    """Scraping harga dari Google Search dengan fallback selector."""
-    search_url = f"https://www.google.com/search?q={query}+harga"
-    response = requests.get(search_url, headers=HEADERS)
-    if response.status_code != 200:
-        logging.error(f"❌ Gagal mengambil data harga dari Google untuk '{query}'")
-        return []
-    soup = BeautifulSoup(response.text, "html.parser")
-    prices = set()
-    # Coba beberapa selector untuk menangkap harga
-    selectors = [
-        "span[jsname='vWLAgc']",
-        "div.BNeawe.iBp4i.AP7Wnd"
-    ]
-    for sel in selectors:
-        for result in soup.select(sel):
-            prices.update(extract_prices(result.get_text()))
-    return list(prices)[:5]
-
 async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia dengan fallback selector."""
+    """Scraping harga dari Tokopedia berdasarkan pencarian teks 'Rp'"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
-    response = requests.get(search_url, headers=HEADERS)
+    response = requests.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
+
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
         return []
+
     soup = BeautifulSoup(response.text, "html.parser")
-    prices = set()
-    selectors = [
-        "div[data-testid='spnSRPProdPrice']",
-        "span.css-12sieg3"  # contoh alternatif; sesuaikan jika perlu
-    ]
-    for sel in selectors:
-        for result in soup.select(sel):
-            prices.update(extract_prices(result.get_text()))
-    return list(prices)[:5]
+
+    # 1️⃣ Ambil semua teks dari halaman
+    all_text = soup.get_text()
+
+    # 2️⃣ Cari semua harga dengan format 'RpX.XXX.XXX' menggunakan regex
+    prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+
+    # 3️⃣ Bersihkan format harga (hilangkan spasi, ubah koma menjadi titik)
+    clean_prices = []
+    for price in prices:
+        price_cleaned = price.replace("Rp", "").replace(" ", "").replace(",", "").strip()
+        try:
+            clean_prices.append(int(price_cleaned))  # Konversi ke integer untuk pencarian harga termurah
+        except ValueError:
+            continue
+
+    # 4️⃣ Ambil harga termurah yang masuk akal
+    if clean_prices:
+        min_price = min(clean_prices)
+        logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{min_price:,}")
+        return [f"Rp{min_price:,}"]
+
+    logging.warning(f"❌ Tidak menemukan harga untuk '{query}' di Tokopedia")
+    return []
 
 async def scrape_shopee_price(query):
     """Scraping harga dari Shopee dengan fallback selector."""
@@ -212,10 +210,6 @@ async def scrape_digimap_price(query):
 async def scrape_price(query):
     """Menggabungkan semua sumber harga dari berbagai e-commerce"""
     logging.info(f"🔍 Mencari harga untuk: {query}")
-
-    logging.info("🔄 Scraping harga dari Google...")
-    google_prices = await scrape_google_price(query)
-    logging.info(f"✅ Hasil Google: {google_prices}")
 
     logging.info("🔄 Scraping harga dari Tokopedia...")
     tokopedia_prices = await scrape_tokopedia_price(query)
