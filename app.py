@@ -101,7 +101,7 @@ def extract_prices(text):
     """Mengambil harga dari teks dengan format Rp."""
     return re.findall(r"Rp ?[\d.,]+", text)
 
-def scrape_google_price(query):
+async def scrape_google_price(query):
     """Scraping harga dari Google Search dengan fallback selector."""
     search_url = f"https://www.google.com/search?q={query}+harga"
     response = requests.get(search_url, headers=HEADERS)
@@ -120,7 +120,7 @@ def scrape_google_price(query):
             prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
-def scrape_tokopedia_price(query):
+async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia dengan fallback selector."""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
     response = requests.get(search_url, headers=HEADERS)
@@ -138,7 +138,7 @@ def scrape_tokopedia_price(query):
             prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
-def scrape_shopee_price(query):
+async def scrape_shopee_price(query):
     """Scraping harga dari Shopee dengan fallback selector."""
     search_url = f"https://shopee.co.id/search?keyword={query}"
     response = requests.get(search_url, headers=HEADERS)
@@ -156,7 +156,7 @@ def scrape_shopee_price(query):
             prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
-def scrape_bukalapak_price(query):
+async def scrape_bukalapak_price(query):
     """Scraping harga dari Bukalapak dengan fallback selector."""
     search_url = f"https://www.bukalapak.com/products?search%5Bkeywords%5D={query}"
     response = requests.get(search_url, headers=HEADERS)
@@ -174,7 +174,7 @@ def scrape_bukalapak_price(query):
             prices.update(extract_prices(result.get_text()))
     return list(prices)[:5]
 
-def scrape_blibli_price(query):
+async def scrape_blibli_price(query):
     """Scraping harga dari Blibli dengan fallback selector."""
     search_url = f"https://www.blibli.com/jual/{query.replace(' ', '-')}"
     response = requests.get(search_url, headers=HEADERS)
@@ -192,7 +192,7 @@ def scrape_blibli_price(query):
             prices.update(extract_prices(result.get_text()))
     return list(prices)
 
-def scrape_digimap_price(query):
+async def scrape_digimap_price(query):
     """Scraping harga dari Digimap dengan fallback selector."""
     search_url = f"https://www.digimap.co.id/collections/{query.replace(' ', '-')}"
     response = requests.get(search_url, headers=HEADERS)
@@ -333,17 +333,27 @@ def normalize_price_query(text):
     # Hilangkan kata-kata tidak relevan
     text = re.sub(r"\b(harga|berapa|coba carikan|tolong cari|tolong carikan|mohon carikan)\b", "", text).strip()
     
-    # Format standar untuk produk Samsung
-    if "s25" in text and "ultra" in text:
-        text = "Samsung Galaxy S25 Ultra"
+    # Hilangkan spasi berlebih dan kata duplikat
+    words = text.split()
+    text = " ".join(sorted(set(words), key=words.index))
 
-    return text
+    # Format standar untuk beberapa produk umum
+    replacements = {
+        "s25 ultra": "Samsung Galaxy S25 Ultra",
+        "iphone 8": "Apple iPhone 8",
+        "iphone 13": "Apple iPhone 13"
+    }
+    for key, value in replacements.items():
+        if key in text:
+            text = value
+
+    return text.strip()
 
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
 
     # Jika ini pertanyaan harga dalam chat (bukan inline query)
-    if text.startswith("harga ") or any(x in text for x in ["berapa harga", "coba carikan harga"]):
+    if text.startswith("harga ") or any(x in text for x in ["berapa harga", "coba carikan harga", "cari harga"]):
         await update.message.reply_text("🔍 Mencari harga...")
 
         # Normalisasi pertanyaan
