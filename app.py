@@ -162,18 +162,18 @@ async def scrape_tokopedia_price(query):
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ Gunakan metode pencarian harga paling umum (mode) untuk akurasi lebih tinggi
+    # 4️⃣ **Gunakan harga termurah yang masuk akal daripada harga paling umum**
     if valid_prices:
-        most_common_price = Counter(valid_prices).most_common(1)[0][0]  # Ambil harga yang paling sering muncul
+        best_price = min(valid_prices)  # Gunakan harga termurah untuk produk flagship
 
-        logging.info(f"✅ Harga paling umum di Tokopedia untuk '{query}': Rp{most_common_price:,}")
-        return [f"Rp{most_common_price:,}".replace(",", ".")]
+        logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{best_price:,}")
+        return [f"Rp{best_price:,}".replace(",", ".")]
 
     logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
     return []
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee dengan pencarian berbasis teks (bukan class selector)."""
+    """Scraping harga dari Shopee berdasarkan teks 'Rp', hanya ambil harga valid"""
     search_url = f"https://www.shopee.co.id/search?keyword={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
     logging.info(f"Link Shopee : '{search_url}'")
@@ -183,24 +183,25 @@ async def scrape_shopee_price(query):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-
-    # 1️⃣ Ambil semua teks dari halaman
     all_text = soup.get_text()
-
-    # 2️⃣ Cari semua harga dengan regex
     raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
 
     logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
 
-    # 3️⃣ Bersihkan harga yang salah dan pastikan format benar
     valid_prices = []
     invalid_prices = []
 
     for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())  # Hapus Rp dan karakter lain
+        price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
+        
+        if '.' in price_cleaned:
+            parts = price_cleaned.split('.')
+            if len(parts[-1]) > 3:
+                price_cleaned = '.'.join(parts[:-1])
+
         try:
-            price_int = int(price_cleaned)  # Konversi ke integer
-            if 500000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
+            price_int = int(price_cleaned.replace(".", ""))
+            if 500000 <= price_int <= 50000000:
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
@@ -210,67 +211,154 @@ async def scrape_shopee_price(query):
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ Ambil harga termurah yang masuk akal
     if valid_prices:
-        min_price = min(valid_prices)
-        logging.info(f"✅ Harga termurah di Shopee untuk '{query}': Rp{min_price:,}")
-        return [f"Rp{min_price:,}"]
+        best_price = min(valid_prices)
+        logging.info(f"✅ Harga termurah di Shopee untuk '{query}': Rp{best_price:,}")
+        return [f"Rp{best_price:,}".replace(",", ".")]
 
     logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Shopee")
     return []
 
 async def scrape_bukalapak_price(query):
-    """Scraping harga dari Bukalapak dengan fallback selector."""
-    search_url = f"https://www.bukalapak.com/products?search%5Bkeywords%5D={query}"
+    """Scraping harga dari Bukalapak berdasarkan teks 'Rp', hanya ambil harga valid"""
+    search_url = f"https://www.bukalapak.com/products?search%5Bkeywords%5D={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
+    logging.info(f"Link Bukalapak : '{search_url}'")
+
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
         return []
+
     soup = BeautifulSoup(response.text, "html.parser")
-    prices = set()
-    selectors = [
-        "span.amount",
-        "span.product-price"  # alternatif jika tersedia
-    ]
-    for sel in selectors:
-        for result in soup.select(sel):
-            prices.update(extract_prices(result.get_text()))
-    return list(prices)[:5]
+    all_text = soup.get_text()
+    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+
+    logging.info(f"🔍 Harga mentah ditemukan di Bukalapak untuk '{query}': {raw_prices}")
+
+    valid_prices = []
+    invalid_prices = []
+
+    for price in raw_prices:
+        price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
+
+        if '.' in price_cleaned:
+            parts = price_cleaned.split('.')
+            if len(parts[-1]) > 3:
+                price_cleaned = '.'.join(parts[:-1])
+
+        try:
+            price_int = int(price_cleaned.replace(".", ""))
+            if 500000 <= price_int <= 50000000:
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
+        except ValueError:
+            invalid_prices.append(price_cleaned)
+
+    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
+    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+
+    if valid_prices:
+        best_price = min(valid_prices)
+        logging.info(f"✅ Harga termurah di Bukalapak untuk '{query}': Rp{best_price:,}")
+        return [f"Rp{best_price:,}".replace(",", ".")]
+
+    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Bukalapak")
+    return []
 
 async def scrape_blibli_price(query):
-    """Scraping harga dari Blibli dengan fallback selector."""
+    """Scraping harga dari Blibli berdasarkan teks 'Rp', hanya ambil harga valid"""
     search_url = f"https://www.blibli.com/jual/{query.replace(' ', '-')}"
     response = requests.get(search_url, headers=HEADERS)
+    logging.info(f"Link Blibli : '{search_url}'")
+
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Blibli untuk '{query}'")
         return []
+
     soup = BeautifulSoup(response.text, "html.parser")
-    prices = set()
-    selectors = [
-        "div.product__price",
-        "span.product-price"  # alternatif
-    ]
-    for sel in selectors:
-        for result in soup.select(sel):
-            prices.update(extract_prices(result.get_text()))
-    return list(prices)
+    all_text = soup.get_text()
+    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+
+    logging.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
+
+    valid_prices = []
+    invalid_prices = []
+
+    for price in raw_prices:
+        price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
+
+        if '.' in price_cleaned:
+            parts = price_cleaned.split('.')
+            if len(parts[-1]) > 3:
+                price_cleaned = '.'.join(parts[:-1])
+
+        try:
+            price_int = int(price_cleaned.replace(".", ""))
+            if 500000 <= price_int <= 50000000:
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
+        except ValueError:
+            invalid_prices.append(price_cleaned)
+
+    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
+    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+
+    if valid_prices:
+        best_price = min(valid_prices)
+        logging.info(f"✅ Harga termurah di Blibli untuk '{query}': Rp{best_price:,}")
+        return [f"Rp{best_price:,}".replace(",", ".")]
+
+    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Blibli")
+    return []
 
 async def scrape_digimap_price(query):
-    """Scraping harga dari Digimap dengan fallback selector."""
+    """Scraping harga dari Digimap berdasarkan teks 'Rp', hanya ambil harga valid"""
     search_url = f"https://www.digimap.co.id/collections/{query.replace(' ', '-')}"
     response = requests.get(search_url, headers=HEADERS)
+    logging.info(f"Link Digimap : '{search_url}'")
+
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Digimap untuk '{query}'")
         return []
+
     soup = BeautifulSoup(response.text, "html.parser")
-    prices = set()
-    selectors = [
-        "span.money"
-    ]
-    for sel in selectors:
-        for result in soup.select(sel):
-            prices.update(extract_prices(result.get_text()))
-    return list(prices)
+    all_text = soup.get_text()
+    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+
+    logging.info(f"🔍 Harga mentah ditemukan di Digimap untuk '{query}': {raw_prices}")
+
+    valid_prices = []
+    invalid_prices = []
+
+    for price in raw_prices:
+        price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
+
+        if '.' in price_cleaned:
+            parts = price_cleaned.split('.')
+            if len(parts[-1]) > 3:
+                price_cleaned = '.'.join(parts[:-1])
+
+        try:
+            price_int = int(price_cleaned.replace(".", ""))
+            if 500000 <= price_int <= 50000000:
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
+        except ValueError:
+            invalid_prices.append(price_cleaned)
+
+    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
+    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+
+    if valid_prices:
+        best_price = min(valid_prices)
+        logging.info(f"✅ Harga termurah di Digimap untuk '{query}': Rp{best_price:,}")
+        return [f"Rp{best_price:,}".replace(",", ".")]
+
+    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Digimap")
+    return []
 
 async def scrape_price(query):
     """Menggabungkan semua sumber harga dari berbagai e-commerce"""
