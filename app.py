@@ -366,7 +366,7 @@ def normalize_price_query(text):
     text = text.lower().strip()
 
     # 1️⃣ Hapus kata pertama jika merupakan kata tanya umum
-    text = re.sub(r"^(berapa|berapa harga|berapa sih|berapa si|cari|tolong|mohon|please|find me|how much|where to buy) ", "", text)
+    text = re.sub(r"^(cek|cek harga|berapa|berapa harga|berapa sih|berapa si|cari|tolong|mohon|please|find me|how much|where to buy) ", "", text)
 
     # 2️⃣ Hapus kata-kata tambahan umum di tengah atau akhir kalimat
     text = re.sub(r"\b(harga|minta|bantu|carikan|tolong carikan|mohon carikan|info|tentang|list harga|daftar harga|diskon|discount|best price)\b", "", text).strip()
@@ -392,7 +392,7 @@ def normalize_price_query(text):
     text = " ".join(text.split())
 
     text = text.replace(" ", "+")
-    
+
     return text.strip()
 
 async def handle_message(update: Update, context: CallbackContext):
