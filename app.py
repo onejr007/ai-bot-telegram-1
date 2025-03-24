@@ -102,7 +102,7 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia berdasarkan pencarian teks 'Rp', hanya ambil harga masuk akal"""
+    """Scraping harga dari Tokopedia berdasarkan teks 'Rp', mengambil semua harga mentah dulu sebelum filtering"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query}"
     response = requests.get(search_url, headers=HEADERS)
 
@@ -115,23 +115,32 @@ async def scrape_tokopedia_price(query):
     # 1️⃣ Ambil semua teks dari halaman
     all_text = soup.get_text()
 
-    # 2️⃣ Cari semua harga dengan format 'RpX.XXX.XXX' menggunakan regex
-    prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+    # 2️⃣ Cari semua harga dengan regex (menangkap semua RpX.XXX.XXX)
+    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+
+    logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
 
     # 3️⃣ Bersihkan format harga (hilangkan spasi, ubah koma menjadi titik)
-    clean_prices = []
-    for price in prices:
+    valid_prices = []
+    invalid_prices = []
+    
+    for price in raw_prices:
         price_cleaned = price.replace("Rp", "").replace(" ", "").replace(",", "").strip()
         try:
             price_int = int(price_cleaned)  # Konversi ke integer
-            if 200000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
-                clean_prices.append(price_int)
+            if 500000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
         except ValueError:
-            continue
+            invalid_prices.append(price_cleaned)
 
-    # 4️⃣ Ambil harga termurah yang masuk akal
-    if clean_prices:
-        min_price = min(clean_prices)
+    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
+    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+
+    # 4️⃣ Ambil harga termurah dari daftar yang valid
+    if valid_prices:
+        min_price = min(valid_prices)
         logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{min_price:,}")
         return [f"Rp{min_price:,}"]
 
