@@ -134,7 +134,7 @@ def scrape_tokopedia_price(query):
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
 
-    for result in soup.find_all("div", class_="prd_link-product-price"):
+    for result in soup.select("div[data-testid='spnSRPProdPrice']"):
         prices.update(extract_prices(result.get_text()))
 
     return list(prices)[:5]
@@ -151,7 +151,7 @@ def scrape_shopee_price(query):
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
 
-    for result in soup.find_all("div", class_="vioxXd"):
+    for result in soup.select("div.xrnzAF span.wNNZR"):
         prices.update(extract_prices(result.get_text()))
 
     return list(prices)[:5]
@@ -168,7 +168,7 @@ def scrape_bukalapak_price(query):
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
 
-    for result in soup.find_all("span", class_="amount"):
+    for result in soup.select("span.amount"):
         prices.update(extract_prices(result.get_text()))
 
     return list(prices)[:5]
