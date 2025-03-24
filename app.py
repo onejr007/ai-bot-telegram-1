@@ -357,7 +357,7 @@ async def handle_message(update: Update, context: CallbackContext):
         await update.message.reply_text("🔍 Mencari harga...")
 
         # Normalisasi pertanyaan
-        normalized_question = normalize_price_question(text)
+        normalized_question = normalize_price_query(text)
 
         # Cek apakah harga sudah pernah dicari sebelumnya
         cached_answer = find_price_in_history(normalized_question)
