@@ -173,7 +173,7 @@ async def scrape_tokopedia_price(query):
     return []
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee menggunakan JSON extraction."""
+    """Scraping harga dari Shopee menggunakan parsing HTML langsung."""
     query = normalize_price_query(query)
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
@@ -184,32 +184,24 @@ async def scrape_shopee_price(query):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
+    price_elements = soup.select("span._1d9_77")  # Selector harga Shopee
 
-    # 1️⃣ Ambil JSON Shopee jika tersedia
-    script_tag = soup.find("script", string=re.compile("window.__PRELOADED_STATE__"))
-    raw_prices = []
-    
-    if script_tag:
-        json_text = re.search(r"window.__PRELOADED_STATE__\s*=\s*({.*?});", script_tag.string)
-        if json_text:
-            try:
-                json_data = json.loads(json_text.group(1))
-                items = json_data.get("listingReducer", {}).get("items", [])
-                raw_prices = [int(item["price"]) for item in items if "price" in item]
-            except Exception as e:
-                logging.error(f"⚠️ Gagal memproses JSON Shopee: {e}")
-
+    raw_prices = [price.get_text() for price in price_elements]
     logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
 
-    # 3️⃣ Filter harga valid
     valid_prices = []
     invalid_prices = []
 
     for price in raw_prices:
-        if 500000 <= price <= 50000000:
-            valid_prices.append(price)
-        else:
-            invalid_prices.append(price)
+        price_cleaned = re.sub(r"[^\d]", "", price)
+        try:
+            price_int = int(price_cleaned)
+            if 500000 <= price_int <= 50000000:
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
+        except ValueError:
+            invalid_prices.append(price_cleaned)
 
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
@@ -234,8 +226,6 @@ async def scrape_bukalapak_price(query):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-
-    # 1️⃣ Ambil JSON Bukalapak
     script_tag = soup.find("script", string=re.compile('"price":'))
     raw_prices = []
 
@@ -250,7 +240,6 @@ async def scrape_bukalapak_price(query):
 
     logging.info(f"🔍 Harga mentah ditemukan di Bukalapak untuk '{query}': {raw_prices}")
 
-    # 3️⃣ Filter harga valid
     valid_prices = []
     invalid_prices = []
 
@@ -272,9 +261,9 @@ async def scrape_bukalapak_price(query):
     return []
 
 async def scrape_blibli_price(query):
-    """Scraping harga dari Blibli berbasis HTML parsing."""
+    """Scraping harga dari Blibli menggunakan endpoint API yang benar."""
     query = normalize_price_query(query)
-    search_url = f"https://www.blibli.com/search?s={query.replace(' ', '+')}"
+    search_url = f"https://www.blibli.com/backend/search/products?searchTerm={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
     logging.info(f"Link Blibli : '{search_url}'")
 
@@ -282,27 +271,18 @@ async def scrape_blibli_price(query):
         logging.error(f"❌ Gagal mengambil data harga dari Blibli untuk '{query}'")
         return []
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    all_text = soup.get_text()
+    try:
+        data = response.json()
+        products = data.get("data", {}).get("products", [])
+        raw_prices = [int(product["price"]["value"]) for product in products]
+    except Exception as e:
+        logging.error(f"⚠️ Gagal memproses JSON Blibli: {e}")
+        return []
 
-    # 1️⃣ Cari semua harga dengan regex
-    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
     logging.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
 
-    # 3️⃣ Filter harga valid
-    valid_prices = []
-    invalid_prices = []
-
-    for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())
-        try:
-            price_int = int(price_cleaned)
-            if 500000 <= price_int <= 50000000:
-                valid_prices.append(price_int)
-            else:
-                invalid_prices.append(price_int)
-        except ValueError:
-            invalid_prices.append(price_cleaned)
+    valid_prices = [p for p in raw_prices if 500000 <= p <= 50000000]
+    invalid_prices = list(set(raw_prices) - set(valid_prices))
 
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
@@ -316,7 +296,7 @@ async def scrape_blibli_price(query):
     return []
 
 async def scrape_digimap_price(query):
-    """Scraping harga dari Digimap berbasis HTML parsing."""
+    """Scraping harga dari Digimap menggunakan HTML parsing."""
     query = normalize_price_query(query)
     search_url = f"https://www.digimap.co.id/search?type=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
@@ -327,21 +307,19 @@ async def scrape_digimap_price(query):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-    all_text = soup.get_text()
+    price_elements = soup.select("span.money")
 
-    # 1️⃣ Cari semua harga dengan regex
-    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+    raw_prices = [price.get_text() for price in price_elements]
     logging.info(f"🔍 Harga mentah ditemukan di Digimap untuk '{query}': {raw_prices}")
 
-    # 3️⃣ Filter harga valid
     valid_prices = []
     invalid_prices = []
 
     for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())
+        price_cleaned = re.sub(r"[^\d]", "", price)
         try:
             price_int = int(price_cleaned)
-            if 5000000 <= price_int <= 100000000:  # Batas harga lebih tinggi
+            if 5000000 <= price_int <= 100000000:
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
