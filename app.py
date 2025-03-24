@@ -7,6 +7,7 @@ import logging
 import asyncio
 import nest_asyncio
 import re
+import random
 
 from bs4 import BeautifulSoup
 from telegram import Update
@@ -17,9 +18,16 @@ nest_asyncio.apply()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-}
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+]
+
+def get_headers():
+    return {"User-Agent": random.choice(USER_AGENTS)}
+
+HEADERS = get_headers()
 
 # Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -97,7 +105,7 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 def scrape_google_price(query):
-    """Scraping harga dari Google Search"""
+    """Scraping harga dari Google Search dengan XPath yang lebih akurat."""
     search_url = f"https://www.google.com/search?q={query}+harga"
     response = requests.get(search_url, headers=HEADERS)
 
@@ -108,15 +116,9 @@ def scrape_google_price(query):
     soup = BeautifulSoup(response.text, "html.parser")
     prices = set()
 
-    # Coba Google Shopping
-    shopping_results = soup.find_all("div", class_="sh-dgr__content")
-    for result in shopping_results:
+    # Ambil harga dari elemen hasil pencarian
+    for result in soup.select("span[jsname='vWLAgc']"):
         prices.update(extract_prices(result.get_text()))
-
-    # Jika Google Shopping tidak ada, ambil dari snippet biasa
-    if not prices:
-        for result in soup.find_all("div", class_="BNeawe iBp4i AP7Wnd"):
-            prices.update(extract_prices(result.text))
 
     return list(prices)[:5]
 
@@ -281,19 +283,17 @@ async def inline_query(update: Update, context: CallbackContext):
         await update.inline_query.answer(results, cache_time=1)
 
 def normalize_price_question(text):
-    """
-    Menyederhanakan pertanyaan harga agar formatnya sama
-    """
     text = text.lower()
     
-    # Hilangkan kata-kata tanya yang tidak mempengaruhi pencarian
-    text = re.sub(r"\b(coba carikan|berapa|tolong cari|tolong carikan|mohon carikan)\b", "", text).strip()
-    
-    # Pastikan format baku menggunakan "harga <produk>"
+    # Hilangkan kata-kata tanya dan "harga" yang berulang
+    text = re.sub(r"\b(harga|berapa|tolong cari|tolong carikan|mohon carikan)\b", "", text).strip()
+
+    # Jika belum ada kata "harga" di depan, tambahkan
     if not text.startswith("harga "):
         text = "harga " + text
 
     return text
+
 
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
