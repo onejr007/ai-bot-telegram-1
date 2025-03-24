@@ -127,11 +127,14 @@ async def scrape_tokopedia_price(query):
 
     for price in raw_prices:
         price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
-        price_cleaned = price_cleaned.rsplit(".", 1)[0]  # Hanya ambil angka sebelum titik terakhir
+
+        # Hanya ambil angka sebelum titik terakhir untuk menghindari angka tambahan
+        if '.' in price_cleaned:
+            price_cleaned = price_cleaned.rsplit('.', 1)[0]
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            if 5000000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
+            if 1000000 <= price_int <= 50000000:  # Hanya ambil harga dalam rentang wajar
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
@@ -141,11 +144,11 @@ async def scrape_tokopedia_price(query):
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ Gunakan statistik mode untuk mendapatkan harga paling sering muncul (lebih akurat)
+    # 4️⃣ Ambil harga paling umum muncul agar lebih akurat
     if valid_prices:
         from statistics import mode
         try:
-            best_price = mode(valid_prices)  # Harga yang paling sering muncul
+            best_price = mode(valid_prices)  # Ambil harga yang paling sering muncul
         except:
             best_price = min(valid_prices)  # Jika tidak ada mode, ambil harga terendah
 
