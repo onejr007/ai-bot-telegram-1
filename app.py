@@ -391,6 +391,8 @@ def normalize_price_query(text):
     # Hilangkan spasi berlebih
     text = " ".join(text.split())
 
+    text = text.replace(" ", "+")
+    
     return text.strip()
 
 async def handle_message(update: Update, context: CallbackContext):
