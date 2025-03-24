@@ -173,6 +173,28 @@ def scrape_bukalapak_price(query):
 
     return list(prices)[:5]
 
+def scrape_blibli_price(query):
+    search_url = f"https://www.blibli.com/jual/{query.replace(' ', '-')}"
+    response = requests.get(search_url, headers=get_headers())
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    prices = []
+    for item in soup.select("div.product__price"):
+        prices.append(item.get_text())
+
+    return prices
+
+def scrape_digimap_price(query):
+    search_url = f"https://www.digimap.co.id/collections/{query.replace(' ', '-')}"
+    response = requests.get(search_url, headers=get_headers())
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    prices = []
+    for item in soup.select("span.money"):
+        prices.append(item.get_text())
+
+    return prices
+
 def scrape_price(query):
     """Menggabungkan semua sumber harga dari berbagai e-commerce"""
     logger.info(f"🔍 Mencari harga untuk: {query}")
@@ -193,7 +215,15 @@ def scrape_price(query):
     bukalapak_prices = scrape_bukalapak_price(query)
     logger.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
 
-    all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices
+    logger.info("🔄 Scraping harga dari Blibli...")
+    blibli_prices = scrape_blibli_price(query)
+    logger.info(f"✅ Hasil Blibli: {blibli_prices}")
+
+    logger.info("🔄 Scraping harga dari Digimap...")
+    digimap_prices = scrape_digimap_price(query)
+    logger.info(f"✅ Hasil Blibli: {digimap_prices}")
+
+    all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices + blibli_prices + digimap_prices
     unique_prices = sorted(set(all_prices))  # Hilangkan duplikasi dan urutkan
 
     if not unique_prices:
