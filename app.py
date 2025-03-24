@@ -106,7 +106,7 @@ async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia berdasarkan teks 'Rp', hanya ambil harga valid"""
     query = normalize_price_query(query)  # Gunakan query yang sudah diperbaiki
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
-    response = requests.get(search_url, headers=HEADERS)
+    response = requests.get(search_url, headers={"User-Agent": "Mozilla/5.0"})
 
     if response.status_code != 200:
         logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
@@ -132,7 +132,7 @@ async def scrape_tokopedia_price(query):
         # Ambil hanya angka sebelum titik terakhir untuk menghindari angka tambahan
         if '.' in price_cleaned:
             parts = price_cleaned.split('.')
-            if len(parts[-1]) <= 3:  # Jika bagian terakhir hanya 3 digit atau kurang, anggap sebagai ribuan
+            if len(parts[-1]) > 3:  # Jika bagian terakhir lebih dari 3 digit, hapus bagian terakhir
                 price_cleaned = '.'.join(parts[:-1])
 
         try:
@@ -152,7 +152,7 @@ async def scrape_tokopedia_price(query):
         most_common_price = Counter(valid_prices).most_common(1)[0][0]  # Ambil harga yang paling sering muncul
 
         logging.info(f"✅ Harga paling umum di Tokopedia untuk '{query}': Rp{most_common_price:,}")
-        return [f"Rp{most_common_price:,}"]
+        return [f"Rp{most_common_price:,}".replace(",", ".")]
 
     logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
     return []
