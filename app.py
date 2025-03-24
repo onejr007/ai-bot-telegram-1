@@ -49,23 +49,37 @@ def save_data(filename, data):
         json.dump(data, file, indent=4, ensure_ascii=False)
 
 def train_markov():
-    data = load_data(CHAT_HISTORY_FILE)
-    if len(data) < 3:
-        logger.warning("⚠️ Data chat terlalu sedikit untuk melatih Markov.")
-        return None
-    text_data = " ".join(data)
-    return markovify.Text(text_data, state_size=2)
+    """Melatih model Markov dari history chat"""
+    try:
+        with open("history_chat.txt", "r", encoding="utf-8") as f:
+            text_data = f.read().strip()
+        
+        if not text_data or len(text_data.split()) < 5:
+            logging.warning("⚠️ Tidak cukup data untuk model Markov! Menggunakan dataset default.")
+            text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
 
-def predict_markov(text):
-    model = train_markov()
-    if model:
-        try:
-            sentence = model.make_sentence_with_start(text, strict=False)
-            if sentence:
-                return sentence
-        except markovify.text.ParamError:
-            logger.warning(f"⚠️ Markov gagal membuat prediksi untuk: {text}")
-    return None
+        return markovify.Text(text_data, state_size=2)
+    
+    except FileNotFoundError:
+        logging.error("❌ File history_chat.txt tidak ditemukan. Menggunakan model default.")
+        text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
+        return markovify.Text(text_data, state_size=2)
+
+def predict_markov(query):
+    """Memprediksi teks berikutnya menggunakan Markov Chain"""
+    try:
+        model = train_markov()
+        prediction = model.make_sentence(tries=10)  # Coba prediksi hingga 10 kali
+        
+        if not prediction:
+            logging.warning(f"⚠️ Tidak ada prediksi Markov untuk: {query}")
+            return ""
+        
+        return prediction
+    
+    except Exception as e:
+        logging.error(f"❌ Gagal memprediksi dengan Markov: {e}")
+        return ""
 
 def add_to_history(text):
     data = load_data(CHAT_HISTORY_FILE)
