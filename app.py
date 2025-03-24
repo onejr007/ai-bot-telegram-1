@@ -382,33 +382,22 @@ def normalize_price_query(text):
     """Membersihkan query agar lebih cocok dengan format pencarian di e-commerce secara fleksibel"""
     text = text.lower().strip()
 
-    # 1️⃣ Hapus kata pertama jika merupakan kata tanya umum
-    text = re.sub(r"^(cek|cek harga|berapa|berapa harga|berapa sih|berapa si|cari|tolong|mohon|please|find me|how much|where to buy) ", "", text)
+    # 1️⃣ Hapus kata-kata tidak relevan dalam berbagai bahasa
+    text = re.sub(r"\b(cek|cek harga|berapa|berapa harga|berapa sih|berapa si|cari|tolong|mohon|please|find me|how much|where to buy)\b", "", text).strip()
 
-    # 2️⃣ Hapus kata-kata tambahan umum di tengah atau akhir kalimat
-    text = re.sub(r"\b(harga|minta|bantu|carikan|tolong carikan|mohon carikan|info|tentang|list harga|daftar harga|diskon|discount|best price)\b", "", text).strip()
-
-    # 3️⃣ Hapus simbol atau karakter yang tidak diperlukan
+    # 2️⃣ Hapus simbol atau karakter yang tidak diperlukan
     text = re.sub(r"[^\w\s]", "", text)  # Menghapus tanda baca seperti "?", "!", ",", dll.
 
-    # 4️⃣ Hilangkan spasi berlebih dan kata duplikat
+    # 3️⃣ Hilangkan spasi berlebih dan kata duplikat
     words = text.split()
     text = " ".join(sorted(set(words), key=words.index))
 
-    # 5️⃣ Cegah query terlalu pendek (misalnya hanya "hp" atau "laptop")
+    # 4️⃣ Koreksi kesalahan umum: ubah "ipun", "ipin", "ipon", dan "ip" menjadi "iphone"
+    text = re.sub(r"\b(ipun|ipin|ipon|ip)(?:\s+(\d+))?\b", r"iphone \2", text).strip()
+
+    # 5️⃣ Pastikan query tidak terlalu pendek (misalnya hanya "hp" atau "laptop")
     if text in ["hp", "laptop", "gpu", "pc", "handphone", "smartphone", "console"]:
-        text += " terbaru"  # Ubah "hp" menjadi "hp terbaru" agar lebih masuk akal
-
-    if text in ["ip", "ipun", "ipon", "ipin"]:
-        text = text.replace("ip ", "iphone ")
-        text = text.replace("ipun ", "iphone ")
-        text = text.replace("ipon ", "iphone ")
-        text = text.replace("ipin ", "iphone ")
-
-    # Hilangkan spasi berlebih
-    text = " ".join(text.split())
-
-    text = text.replace(" ", "+")
+        text += " terbaru"
 
     return text.strip()
 
