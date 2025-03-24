@@ -327,25 +327,25 @@ async def inline_query(update: Update, context: CallbackContext):
         await update.inline_query.answer(results, cache_time=1)
 
 def normalize_price_query(text):
-    """Membersihkan query agar lebih cocok dengan format pencarian di e-commerce"""
+    """Membersihkan query agar lebih cocok dengan format pencarian di e-commerce secara fleksibel"""
     text = text.lower().strip()
-    
-    # Hilangkan kata-kata tidak relevan
-    text = re.sub(r"\b(harga|berapa|coba carikan|tolong cari|tolong carikan|mohon carikan)\b", "", text).strip()
-    
-    # Hilangkan spasi berlebih dan kata duplikat
+
+    # 1️⃣ Hapus kata pertama jika merupakan kata tanya umum
+    text = re.sub(r"^(berapa|berapa harga|berapa sih|berapa si|cari|tolong|mohon|please|find me|how much|where to buy) ", "", text)
+
+    # 2️⃣ Hapus kata-kata tambahan umum di tengah atau akhir kalimat
+    text = re.sub(r"\b(harga|minta|bantu|carikan|tolong carikan|mohon carikan|info|tentang|list harga|daftar harga|diskon|discount|best price)\b", "", text).strip()
+
+    # 3️⃣ Hapus simbol atau karakter yang tidak diperlukan
+    text = re.sub(r"[^\w\s]", "", text)  # Menghapus tanda baca seperti "?", "!", ",", dll.
+
+    # 4️⃣ Hilangkan spasi berlebih dan kata duplikat
     words = text.split()
     text = " ".join(sorted(set(words), key=words.index))
 
-    # Format standar untuk beberapa produk umum
-    replacements = {
-        "s25 ultra": "Samsung Galaxy S25 Ultra",
-        "iphone 8": "Apple iPhone 8",
-        "iphone 13": "Apple iPhone 13"
-    }
-    for key, value in replacements.items():
-        if key in text:
-            text = value
+    # 5️⃣ Cegah query terlalu pendek (misalnya hanya "hp" atau "laptop")
+    if text in ["hp", "laptop", "gpu", "pc", "handphone", "smartphone", "console"]:
+        text += " terbaru"  # Ubah "hp" menjadi "hp terbaru" agar lebih masuk akal
 
     return text.strip()
 
@@ -353,29 +353,38 @@ async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
 
     # Jika ini pertanyaan harga dalam chat (bukan inline query)
-    if text.startswith("harga ") or any(x in text for x in ["berapa harga", "coba carikan harga", "cari harga"]):
+    if is_price_question(text):
         await update.message.reply_text("🔍 Mencari harga...")
-
-        # Normalisasi pertanyaan
         normalized_question = normalize_price_query(text)
+        prices = await scrape_price(normalized_question)
 
-        # Cek apakah harga sudah pernah dicari sebelumnya
-        cached_answer = find_price_in_history(normalized_question)
-        if cached_answer:
-            answer = cached_answer
+        if prices:
+            min_price = min(prices)
+            max_price = max(prices)
+            answer = f"Kisaran Harga: {min_price} - {max_price}"
         else:
-            prices = await scrape_price(normalized_question)
-            if prices:
-                min_price = min(prices)
-                max_price = max(prices)
-                answer = f"Kisaran Harga: {min_price} - {max_price}"
-                save_price_data(normalized_question, answer)
-            else:
-                answer = "❌ Tidak dapat menemukan harga untuk produk tersebut."
+            answer = "❌ Tidak dapat menemukan harga untuk produk tersebut."
 
         await update.message.reply_text(answer)
     else:
-        await update.message.reply_text("Silakan ketik pertanyaan harga atau gunakan inline query untuk prediksi teks.")
+        await handle_general_question(update, text)  # Panggil fungsi lain untuk pertanyaan umum
+
+async def handle_general_question(update, text):
+    """Menangani pertanyaan yang tidak berkaitan dengan harga"""
+    await update.message.reply_text("Saya mendeteksi ini bukan pertanyaan tentang harga. Fungsi lain akan segera ditambahkan!")
+
+def is_price_question(text):
+    """Deteksi apakah pertanyaan berkaitan dengan harga atau tidak"""
+    text = text.lower().strip()
+    
+    # Kata kunci yang menunjukkan pertanyaan tentang harga
+    price_keywords = [
+        "harga", "berapa harga", "cari harga", "harga terbaru", "diskon", "best price",
+        "murah", "mahal", "kisaran harga", "harga pasaran", "harga second", "harga bekas"
+    ]
+
+    # Jika salah satu kata kunci muncul dalam teks, berarti pertanyaan tentang harga
+    return any(keyword in text for keyword in price_keywords)
 
 def main():
     app = Application.builder().token(TOKEN).build()
