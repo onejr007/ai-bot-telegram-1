@@ -209,32 +209,32 @@ async def scrape_digimap_price(query):
             prices.update(extract_prices(result.get_text()))
     return list(prices)
 
-def scrape_price(query):
+async def scrape_price(query):
     """Menggabungkan semua sumber harga dari berbagai e-commerce"""
     logging.info(f"🔍 Mencari harga untuk: {query}")
 
     logging.info("🔄 Scraping harga dari Google...")
-    google_prices = scrape_google_price(query)
+    google_prices = await scrape_google_price(query)
     logging.info(f"✅ Hasil Google: {google_prices}")
 
     logging.info("🔄 Scraping harga dari Tokopedia...")
-    tokopedia_prices = scrape_tokopedia_price(query)
+    tokopedia_prices = await scrape_tokopedia_price(query)
     logging.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
 
     logging.info("🔄 Scraping harga dari Shopee...")
-    shopee_prices = scrape_shopee_price(query)
+    shopee_prices = await scrape_shopee_price(query)
     logging.info(f"✅ Hasil Shopee: {shopee_prices}")
 
     logging.info("🔄 Scraping harga dari Bukalapak...")
-    bukalapak_prices = scrape_bukalapak_price(query)
+    bukalapak_prices = await scrape_bukalapak_price(query)
     logging.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
 
     logging.info("🔄 Scraping harga dari Blibli...")
-    blibli_prices = scrape_blibli_price(query)
+    blibli_prices = await scrape_blibli_price(query)
     logging.info(f"✅ Hasil Blibli: {blibli_prices}")
 
     logging.info("🔄 Scraping harga dari Digimap...")
-    digimap_prices = scrape_digimap_price(query)
+    digimap_prices = await scrape_digimap_price(query)
     logging.info(f"✅ Hasil Digimap: {digimap_prices}")
 
     all_prices = google_prices + tokopedia_prices + shopee_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
@@ -364,7 +364,7 @@ async def handle_message(update: Update, context: CallbackContext):
         if cached_answer:
             answer = cached_answer
         else:
-            prices = scrape_price(normalized_question)
+            prices = await scrape_price(normalized_question)
             if prices:
                 min_price = min(prices)
                 max_price = max(prices)
