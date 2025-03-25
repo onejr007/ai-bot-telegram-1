@@ -147,32 +147,29 @@ async def scrape_tokopedia_price(query):
         # Hilangkan angka tambahan jika formatnya aneh
         if '.' in price_cleaned:
             parts = price_cleaned.split('.')
-            if len(parts[-1]) == 5:  # Format .XXXXX, hapus 2 digit terakhir
-                price_cleaned = price_cleaned[:-2]
-            elif len(parts[-1]) == 6:  # Format .XXXXXX, hapus 3 digit terakhir
-                price_cleaned = price_cleaned[:-3]
+            if len(parts[-1]) > 3:  # Jika bagian terakhir lebih dari 3 digit, hapus bagian terakhir
+                price_cleaned = '.'.join(parts[:-1])
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            if 5000000 <= price_int <= 100000000:  # Rentang harga masuk akal untuk HP
-                valid_prices.append(price_int)
-            else:
-                invalid_prices.append(price_int)
+            valid_prices.append(price_int)
         except ValueError:
             invalid_prices.append(price_cleaned)
 
-    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
+    logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # **Ambil harga yang masuk akal berdasarkan rata-rata harga terdekat**
+    # **Buang harga yang terlalu jauh dari rata-rata**
     if valid_prices:
-        avg_price = int(mean(valid_prices))  # Hitung rata-rata
-        min_price = min(valid_prices)
-        max_price = max(valid_prices)
+        avg_price = mean(valid_prices)
+        min_limit = avg_price * 0.8  # Ambil harga minimal 80% dari rata-rata
+        max_limit = avg_price * 1.2  # Ambil harga maksimal 120% dari rata-rata
 
-        # Ambil harga dalam range yang tidak terlalu jauh dari rata-rata
-        filtered_prices = [p for p in valid_prices if (0.8 * avg_price) <= p <= (1.2 * avg_price)]
-        best_price = min(filtered_prices) if filtered_prices else min_price  # Ambil harga paling masuk akal
+        filtered_prices = [p for p in valid_prices if min_limit <= p <= max_limit]
+        if not filtered_prices:
+            filtered_prices = valid_prices  # Jika semua harga terbuang, gunakan semua harga awal
+
+        best_price = min(filtered_prices)  # Pilih harga termurah dalam range masuk akal
 
         logging.info(f"✅ Harga terbaik di Tokopedia untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}".replace(",", ".")]
