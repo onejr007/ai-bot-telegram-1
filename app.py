@@ -137,7 +137,6 @@ def clean_price_format(price_str):
     except ValueError:
         return None  # Jika gagal parsing, return None
 
-
 def remove_outliers(prices):
     """Menghapus outlier menggunakan metode interquartile range (IQR)"""
     if len(prices) < 4:  
