@@ -119,22 +119,26 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 def clean_price_format(price_str):
-    """Membersihkan harga dari format tidak valid dan angka tambahan setelah harga utama"""
+    """Membersihkan harga dan mengambil angka utama sebelum angka tambahan."""
     if not isinstance(price_str, str):
         return None  # Abaikan jika bukan string
 
     # Hapus karakter selain angka dan titik
     price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
 
-    # Ambil hanya bagian utama harga (hindari angka tambahan di belakang)
-    price_cleaned = price_cleaned.split(".")[0]  # Ambil angka utama sebelum titik kedua
+    # Ambil hanya angka utama sebelum angka tambahan
+    match = re.match(r"([\d.]+)", price_cleaned)  # Ambil angka pertama yang valid
+
+    if not match:
+        return None
+
+    price_main = match.group(1)
 
     # Hapus titik agar bisa dikonversi ke integer
-    price_cleaned = price_cleaned.replace('.', '')
+    price_main = price_main.replace('.', '')
 
-    # Konversi ke integer dengan penanganan error
     try:
-        return int(price_cleaned)
+        return int(price_main)
     except ValueError:
         return None  # Jika parsing gagal, return None
 
