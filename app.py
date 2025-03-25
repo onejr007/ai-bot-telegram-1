@@ -27,6 +27,18 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
 ]
 
+def get_headers(site):
+    """Menghasilkan headers dinamis berdasarkan situs"""
+    referers = {
+        "tokopedia": "https://www.tokopedia.com/",
+        "shopee": "https://shopee.co.id/",
+    }
+    
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Referer": referers.get(site, "https://google.com/"),  # Default ke Google jika tidak dikenal
+    }
+
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
 # Konfigurasi logger
@@ -140,16 +152,16 @@ def clean_price_format(price_str):
 def get_min_reasonable_price(prices):
     """Menentukan batas harga minimum yang masuk akal."""
     if len(prices) < 4:
-        return min(prices) if prices else 0  # Jika sedikit data, gunakan harga minimum
+        return min(prices) if prices else 0  # Jika data terlalu sedikit, pakai harga terendah yang tersedia
 
     sorted_prices = sorted(prices)
     q1 = median(sorted_prices[:len(sorted_prices)//2])  # Kuartil pertama (Q1)
     median_price = median(sorted_prices)  # Median harga
 
-    # Harga minimum harus minimal setengah dari median
+    # Harga minimum setidaknya setengah dari median
     min_reasonable = max(q1, median_price / 2)
 
-    # Jika Q1 masih terlalu kecil, gunakan median sebagai batas harga minimum
+    # Jika batas masih terlalu rendah, gunakan median sebagai batas bawah
     if min_reasonable < median_price / 2:
         min_reasonable = median_price / 2
 
@@ -158,7 +170,8 @@ def get_min_reasonable_price(prices):
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia dan merata-ratakan harga valid."""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
-    response = requests.get(search_url, headers=HEADERS)
+    response = requests.get(search_url, headers=get_headers("tokopedia"))
+
     logging.info(f"Link Tokped : '{search_url}'")
 
     if response.status_code != 200:
@@ -196,37 +209,43 @@ async def scrape_tokopedia_price(query):
     return [f"Rp{avg_price:,}".replace(",", ".")]
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee menggunakan requests tanpa browser"""
-    query = query.replace(" ", "%20")
-    search_url = f"https://shopee.co.id/search?keyword={query}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Referer": "https://shopee.co.id/"
-    }
-
-    response = requests.get(search_url, headers=headers)
+    """Scraping harga dari Shopee menggunakan API JSON"""
+    query_encoded = query.replace(" ", "%20")
+    api_url = f"https://shopee.co.id/api/v4/search/search_items?by=relevancy&keyword={query_encoded}&limit=30&newest=0&order=desc&page_type=search"
+    
+    response = requests.get(api_url, headers=get_headers("shopee"))
+    
     if response.status_code != 200:
         logging.warning(f"⚠️ Gagal mengakses Shopee (status {response.status_code})")
         return []
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    
-    # Ambil harga produk pertama yang ditemukan
-    raw_prices = soup.find_all("span", string=re.compile(r"Rp"))
+    data = response.json()
 
-    prices = []
-    for price in raw_prices:
-        price_text = re.sub(r"[^\d]", "", price.get_text())
-        if price_text.isdigit():
-            prices.append(int(price_text))
+    # Ambil semua harga dari hasil pencarian
+    prices = [item["item_basic"]["price"] // 100000 for item in data.get("items", [])]
 
-    if prices:
-        best_price = min(prices)
-        logging.info(f"✅ Harga termurah di Shopee untuk '{query}': Rp{best_price:,}")
-        return [f"Rp{best_price:,}"]
+    if not prices:
+        logging.warning(f"❌ Tidak menemukan harga untuk '{query}' di Shopee")
+        return []
 
-    logging.warning(f"❌ Tidak menemukan harga untuk '{query}' di Shopee")
-    return []
+    logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {prices}")
+
+    # Tentukan batas harga minimum yang masuk akal
+    min_reasonable_price = get_min_reasonable_price(prices)
+    logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
+
+    # Filter harga yang lebih rendah dari batas masuk akal
+    filtered_prices = [p for p in prices if p >= min_reasonable_price]
+    logging.info(f"✅ Harga setelah filter: {filtered_prices}")
+
+    if not filtered_prices:
+        logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
+        return []
+
+    avg_price = round(mean(filtered_prices))
+    logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
+
+    return [f"Rp{avg_price:,}".replace(",", ".")]
 
 async def scrape_bukalapak_price(query):
     """Scraping harga dari Bukalapak menggunakan JSON API."""
