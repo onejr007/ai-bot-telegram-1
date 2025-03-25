@@ -118,6 +118,22 @@ def extract_prices(text):
     """Mengambil harga dari teks dengan format Rp."""
     return re.findall(r"Rp ?[\d.,]+", text)
 
+def clean_price_format(price_str):
+    """Membersihkan format harga dengan menghapus angka tambahan setelah titik terakhir jika lebih dari 3 digit"""
+    price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
+
+    # Perbaiki jika ada angka tambahan setelah titik terakhir
+    if '.' in price_cleaned:
+        parts = price_cleaned.split('.')
+
+        # Hapus angka tambahan jika setelah titik terakhir lebih dari 3 digit
+        if len(parts[-1]) > 3:
+            parts[-1] = parts[-1][:3]  # Simpan hanya tiga digit pertama setelah titik terakhir
+        
+        price_cleaned = '.'.join(parts)
+
+    return price_cleaned
+
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia berdasarkan teks 'Rp', hanya ambil harga valid"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
@@ -142,13 +158,7 @@ async def scrape_tokopedia_price(query):
     invalid_prices = []
 
     for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
-
-        # Hilangkan angka tambahan jika formatnya aneh
-        if '.' in price_cleaned:
-            parts = price_cleaned.split('.')
-            if len(parts[-1]) > 3:  # Jika bagian terakhir lebih dari 3 digit, hapus bagian terakhir
-                price_cleaned = '.'.join(parts[:-1])
+        price_cleaned = clean_price_format(price)
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
