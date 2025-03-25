@@ -116,7 +116,7 @@ def predict_google(text):
 
 def extract_prices(text):
     """Mengambil harga dari teks dengan format Rp."""
-    return re.findall(r"Rp ?[\d.,]+", text)
+    return re.findall(r"Rp\s?[\d.,]+", text)
 
 def clean_price_format(price_str):
     """Membersihkan harga dari format tidak valid dan angka tambahan setelah harga utama"""
@@ -126,7 +126,7 @@ def clean_price_format(price_str):
     # Hapus "Rp" dan spasi awal
     price_cleaned = price_str.replace("Rp", "").strip()
 
-    # Cari pola harga utama yang memiliki format angka dengan titik pemisah ribuan
+    # Cari pola harga utama dengan format angka dan titik pemisah ribuan
     match = re.search(r"(\d{1,3}(?:\.\d{3})*)", price_cleaned)
 
     if not match:
@@ -136,12 +136,26 @@ def clean_price_format(price_str):
     price_main = match.group(1)
 
     # Hapus titik agar bisa dikonversi ke integer
-    return int(price_main.replace(".", ""))
+    price_value = int(price_main.replace(".", ""))
+
+    return price_value
+
+def determine_minimum_price(prices):
+    """Menentukan harga terendah yang masuk akal berdasarkan distribusi data"""
+    if not prices:
+        return 0  # Jika tidak ada harga, tidak ada batas minimum
+
+    sorted_prices = sorted(prices)
+    q1 = median(sorted_prices[:len(sorted_prices)//2])  # Kuartil pertama (Q1)
+    
+    return max(q1 // 2, 50000)  # Minimal 50rb untuk menghindari harga aneh
 
 def remove_outliers(prices):
     """Menghapus outlier menggunakan metode interquartile range (IQR)"""
     if len(prices) < 4:  
         return prices  # Tidak cukup data untuk menghitung IQR, gunakan semua harga
+
+    prices.sort()  # Pastikan data terurut sebelum median dihitung
 
     q1 = median(prices[:len(prices)//2])  # Kuartil pertama (Q1)
     q3 = median(prices[len(prices)//2:])  # Kuartil ketiga (Q3)
@@ -170,7 +184,7 @@ async def scrape_tokopedia_price(query):
     all_text = soup.get_text()
 
     # Cari semua harga yang valid menggunakan regex
-    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+    raw_prices = extract_prices(all_text)
 
     logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
 
@@ -187,6 +201,12 @@ async def scrape_tokopedia_price(query):
 
     logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+
+    # **Menentukan batas harga minimum berdasarkan data yang ditemukan**
+    min_valid_price = determine_minimum_price(valid_prices)
+    logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_valid_price}")
+
+    valid_prices = [p for p in valid_prices if p >= min_valid_price]
 
     # **Filter harga berdasarkan distribusi data (IQR)**
     filtered_prices = remove_outliers(valid_prices)
