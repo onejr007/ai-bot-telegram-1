@@ -138,18 +138,6 @@ def clean_price_format(price_str):
     # Hapus titik agar bisa dikonversi ke integer
     return int(price_main.replace(".", ""))
 
-# Contoh pengujian
-test_prices = [
-    "Rp4.280.000", 
-    "Rp4.600.000250", 
-    "Rp6.252.5004.9100", 
-    "Rp5.600.0004.91", 
-    "Rp11.999.0005.070"
-]
-
-cleaned_prices = [clean_price_format(p) for p in test_prices]
-logging.info(f"Test harga yang sudah di cleaning : '{cleaned_prices}'")
-
 def remove_outliers(prices):
     """Menghapus outlier menggunakan metode interquartile range (IQR)"""
     if len(prices) < 4:  
