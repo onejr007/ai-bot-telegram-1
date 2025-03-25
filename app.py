@@ -190,8 +190,8 @@ async def scrape_shopee_price(query):
     soup = BeautifulSoup(response.text, "html.parser")
     
     # Ambil harga produk pertama yang ditemukan
-    raw_prices = soup.find_all("span", class_=re.compile(r"currency"))
-    
+    raw_prices = soup.find_all("span", string=re.compile(r"Rp"))
+
     prices = []
     for price in raw_prices:
         price_text = re.sub(r"[^\d]", "", price.get_text())
