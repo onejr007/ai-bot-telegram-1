@@ -119,16 +119,19 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 def clean_price_format(price_str):
-    """Membersihkan format harga dan menghapus angka tambahan setelah titik terakhir dengan benar"""
+    """Membersihkan format harga dengan benar dan menghilangkan angka tambahan setelah harga utama"""
+    if not isinstance(price_str, str):
+        return None  # Jika bukan string, abaikan
+
     # Hapus karakter selain angka dan titik
     price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
 
     # Menjaga hanya angka sebelum titik kedua (jika ada lebih dari dua titik)
-    if price_cleaned.count('.') > 2:
-        parts = price_cleaned.split('.')
+    parts = price_cleaned.split('.')
+    if len(parts) > 2:
         price_cleaned = '.'.join(parts[:2])  # Ambil hanya dua bagian pertama
 
-    # Hilangkan titik agar bisa dikonversi ke integer
+    # Hapus titik agar bisa dikonversi ke integer
     price_cleaned = price_cleaned.replace('.', '')
 
     # Konversi ke angka bulat
