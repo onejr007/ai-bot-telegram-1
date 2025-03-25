@@ -119,28 +119,36 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 def clean_price_format(price_str):
-    """Membersihkan harga dan mengambil angka utama sebelum angka tambahan."""
+    """Membersihkan harga dari format tidak valid dan angka tambahan setelah harga utama"""
     if not isinstance(price_str, str):
         return None  # Abaikan jika bukan string
 
-    # Hapus karakter selain angka dan titik
-    price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
+    # Hapus "Rp" dan spasi awal
+    price_cleaned = price_str.replace("Rp", "").strip()
 
-    # Ambil hanya angka utama sebelum angka tambahan
-    match = re.match(r"([\d.]+)", price_cleaned)  # Ambil angka pertama yang valid
+    # Cari pola harga utama yang memiliki format angka dengan titik pemisah ribuan
+    match = re.search(r"(\d{1,3}(?:\.\d{3})*)", price_cleaned)
 
     if not match:
-        return None
+        return None  # Abaikan jika tidak menemukan angka yang sesuai
 
+    # Ambil hanya bagian harga utama
     price_main = match.group(1)
 
     # Hapus titik agar bisa dikonversi ke integer
-    price_main = price_main.replace('.', '')
+    return int(price_main.replace(".", ""))
 
-    try:
-        return int(price_main)
-    except ValueError:
-        return None  # Jika parsing gagal, return None
+# Contoh pengujian
+test_prices = [
+    "Rp4.280.000", 
+    "Rp4.600.000250", 
+    "Rp6.252.5004.9100", 
+    "Rp5.600.0004.91", 
+    "Rp11.999.0005.070"
+]
+
+cleaned_prices = [clean_price_format(p) for p in test_prices]
+logging.info(f"Test harga yang sudah di cleaning : '{cleaned_prices}'")
 
 def remove_outliers(prices):
     """Menghapus outlier menggunakan metode interquartile range (IQR)"""
