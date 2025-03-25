@@ -119,7 +119,7 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 def clean_price_format(price_str):
-    """Membersihkan format harga dengan menghapus angka tambahan setelah titik terakhir jika lebih dari 3 digit"""
+    """Membersihkan format harga dengan benar, menghapus angka tambahan setelah titik terakhir"""
     price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
 
     # Perbaiki jika ada angka tambahan setelah titik terakhir
@@ -135,7 +135,7 @@ def clean_price_format(price_str):
     return price_cleaned
 
 async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia berdasarkan teks 'Rp', hanya ambil harga valid"""
+    """Scraping harga dari Tokopedia dengan filtering harga yang lebih baik"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
     logging.info(f"Link Tokped : '{search_url}'")
@@ -162,7 +162,13 @@ async def scrape_tokopedia_price(query):
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            valid_prices.append(price_int)
+            
+            # **Filter harga yang masuk akal (buang yang terlalu kecil)**
+            if price_int >= 500000:  
+                valid_prices.append(price_int)
+            else:
+                invalid_prices.append(price_int)
+
         except ValueError:
             invalid_prices.append(price_cleaned)
 
