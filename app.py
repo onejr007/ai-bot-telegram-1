@@ -119,23 +119,34 @@ def extract_prices(text):
     return re.findall(r"Rp ?[\d.,]+", text)
 
 def clean_price_format(price_str):
-    """Membersihkan format harga dengan benar, menghapus angka tambahan setelah titik terakhir"""
+    """Membersihkan format harga dengan menghapus angka tambahan setelah titik terakhir"""
     price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
 
-    # Perbaiki jika ada angka tambahan setelah titik terakhir
+    # Jika ada angka tambahan setelah titik terakhir, hapus semua setelah titik pertama
     if '.' in price_cleaned:
         parts = price_cleaned.split('.')
-
-        # Hapus angka tambahan jika setelah titik terakhir lebih dari 3 digit
-        if len(parts[-1]) > 3:
-            parts[-1] = parts[-1][:3]  # Simpan hanya tiga digit pertama setelah titik terakhir
-        
-        price_cleaned = '.'.join(parts)
+        price_cleaned = '.'.join(parts[:2])  # Hanya ambil bagian sebelum titik kedua
 
     return price_cleaned
 
+def remove_outliers(prices):
+    """Menghapus outlier menggunakan metode interquartile range (IQR)"""
+    if len(prices) < 4:  
+        return prices  # Tidak cukup data untuk menghitung IQR, gunakan semua harga
+
+    q1 = median(prices[:len(prices)//2])  # Kuartil pertama (Q1)
+    q3 = median(prices[len(prices)//2:])  # Kuartil ketiga (Q3)
+    iqr = q3 - q1
+
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+
+    filtered_prices = [p for p in prices if lower_bound <= p <= upper_bound]
+
+    return filtered_prices if filtered_prices else prices  # Jika semua harga dianggap outlier, pakai semua harga awal
+
 async def scrape_tokopedia_price(query):
-    """Scraping harga dari Tokopedia dengan filtering harga yang lebih baik"""
+    """Scraping harga dari Tokopedia dan merata-ratakan harga valid"""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
     logging.info(f"Link Tokped : '{search_url}'")
@@ -162,12 +173,7 @@ async def scrape_tokopedia_price(query):
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            
-            # **Filter harga yang masuk akal (buang yang terlalu kecil)**
-            if price_int >= 500000:  
-                valid_prices.append(price_int)
-            else:
-                invalid_prices.append(price_int)
+            valid_prices.append(price_int)
 
         except ValueError:
             invalid_prices.append(price_cleaned)
@@ -175,20 +181,17 @@ async def scrape_tokopedia_price(query):
     logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # **Buang harga yang terlalu jauh dari rata-rata**
-    if valid_prices:
-        avg_price = mean(valid_prices)
-        min_limit = avg_price * 0.8  # Ambil harga minimal 80% dari rata-rata
-        max_limit = avg_price * 1.2  # Ambil harga maksimal 120% dari rata-rata
+    # **Filter harga berdasarkan distribusi data (IQR)**
+    filtered_prices = remove_outliers(valid_prices)
+    
+    logging.info(f"✅ Harga setelah filter outlier: {filtered_prices}")
 
-        filtered_prices = [p for p in valid_prices if min_limit <= p <= max_limit]
-        if not filtered_prices:
-            filtered_prices = valid_prices  # Jika semua harga terbuang, gunakan semua harga awal
+    # **Rata-rata harga setelah filtering**
+    if filtered_prices:
+        avg_price = round(mean(filtered_prices))
 
-        best_price = min(filtered_prices)  # Pilih harga termurah dalam range masuk akal
-
-        logging.info(f"✅ Harga terbaik di Tokopedia untuk '{query}': Rp{best_price:,}")
-        return [f"Rp{best_price:,}".replace(",", ".")]
+        logging.info(f"✅ Harga rata-rata di Tokopedia untuk '{query}': Rp{avg_price:,}")
+        return [f"Rp{avg_price:,}".replace(",", ".")]
 
     logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
     return []
