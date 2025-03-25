@@ -174,35 +174,36 @@ async def scrape_tokopedia_price(query):
     return []
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee menggunakan session browser untuk memproses JavaScript."""
-    query = normalize_price_query(query)
-    search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '+')}"
+    """Scraping harga dari Shopee menggunakan requests tanpa browser"""
+    query = query.replace(" ", "%20")
+    search_url = f"https://shopee.co.id/search?keyword={query}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Referer": "https://shopee.co.id/"
+    }
+
+    response = requests.get(search_url, headers=headers)
+    if response.status_code != 200:
+        logging.warning(f"⚠️ Gagal mengakses Shopee (status {response.status_code})")
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
     
-    session = AsyncHTMLSession()
-    response = await session.get(search_url)
-    await response.html.arender(timeout=10)
-    logging.info(f"Link Shopee : '{search_url}'")
-
-    # Ambil elemen harga dengan XPath
-    raw_prices = response.html.xpath("//span[contains(@class, 'kP+span')]/text()")
-    logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
-
-    valid_prices = []
+    # Ambil harga produk pertama yang ditemukan
+    raw_prices = soup.find_all("span", class_=re.compile(r"currency"))
+    
+    prices = []
     for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price)
-        try:
-            price_int = int(price_cleaned)
-            if 500000 <= price_int <= 50000000:
-                valid_prices.append(price_int)
-        except ValueError:
-            continue
+        price_text = re.sub(r"[^\d]", "", price.get_text())
+        if price_text.isdigit():
+            prices.append(int(price_text))
 
-    if valid_prices:
-        best_price = min(valid_prices)
+    if prices:
+        best_price = min(prices)
         logging.info(f"✅ Harga termurah di Shopee untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}"]
 
-    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Shopee")
+    logging.warning(f"❌ Tidak menemukan harga untuk '{query}' di Shopee")
     return []
 
 async def scrape_bukalapak_price(query):
