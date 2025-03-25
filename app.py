@@ -119,7 +119,6 @@ def extract_prices(text):
 
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia berdasarkan teks 'Rp', hanya ambil harga valid"""
-    query = normalize_price_query(query)  # Gunakan query yang sudah diperbaiki
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS)
     logging.info(f"Link Tokped : '{search_url}'")
@@ -130,30 +129,31 @@ async def scrape_tokopedia_price(query):
 
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # 1️⃣ Ambil semua teks dari halaman
+    # Ambil semua teks dari halaman
     all_text = soup.get_text()
 
-    # 2️⃣ Cari semua harga yang valid menggunakan regex
+    # Cari semua harga yang valid menggunakan regex
     raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
 
     logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
 
-    # 3️⃣ Bersihkan harga yang salah dan pastikan format benar
     valid_prices = []
     invalid_prices = []
 
     for price in raw_prices:
         price_cleaned = re.sub(r"[^\d.]", "", price.replace("Rp", "").strip())
 
-        # Ambil hanya angka sebelum titik terakhir untuk menghindari angka tambahan
+        # Hilangkan angka tambahan jika formatnya aneh
         if '.' in price_cleaned:
             parts = price_cleaned.split('.')
-            if len(parts[-1]) > 3:  # Jika bagian terakhir lebih dari 3 digit, hapus bagian terakhir
-                price_cleaned = '.'.join(parts[:-1])
+            if len(parts[-1]) == 5:  # Format .XXXXX, hapus 2 digit terakhir
+                price_cleaned = price_cleaned[:-2]
+            elif len(parts[-1]) == 6:  # Format .XXXXXX, hapus 3 digit terakhir
+                price_cleaned = price_cleaned[:-3]
 
         try:
             price_int = int(price_cleaned.replace(".", ""))
-            if 5000000 <= price_int <= 100000000:  # Pastikan harga masuk akal untuk HP flagship
+            if 5000000 <= price_int <= 100000000:  # Rentang harga masuk akal untuk HP
                 valid_prices.append(price_int)
             else:
                 invalid_prices.append(price_int)
@@ -163,11 +163,17 @@ async def scrape_tokopedia_price(query):
     logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
-    # 4️⃣ **Gunakan harga termurah yang masuk akal daripada harga paling umum**
+    # **Ambil harga yang masuk akal berdasarkan rata-rata harga terdekat**
     if valid_prices:
-        best_price = min(valid_prices)  # Gunakan harga termurah untuk produk flagship
+        avg_price = int(mean(valid_prices))  # Hitung rata-rata
+        min_price = min(valid_prices)
+        max_price = max(valid_prices)
 
-        logging.info(f"✅ Harga termurah di Tokopedia untuk '{query}': Rp{best_price:,}")
+        # Ambil harga dalam range yang tidak terlalu jauh dari rata-rata
+        filtered_prices = [p for p in valid_prices if (0.8 * avg_price) <= p <= (1.2 * avg_price)]
+        best_price = min(filtered_prices) if filtered_prices else min_price  # Ambil harga paling masuk akal
+
+        logging.info(f"✅ Harga terbaik di Tokopedia untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}".replace(",", ".")]
 
     logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
