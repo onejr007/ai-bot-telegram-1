@@ -137,30 +137,23 @@ def clean_price_format(price_str):
 
     return int(price_main)
 
-def remove_outliers(prices):
-    """Menghapus outlier menggunakan metode interquartile range (IQR)."""
-    if len(prices) < 4:
-        return prices  # Tidak cukup data untuk menghitung IQR, gunakan semua harga
-
-    prices_sorted = sorted(prices)
-    q1 = median(prices_sorted[:len(prices_sorted)//2])  # Kuartil pertama (Q1)
-    q3 = median(prices_sorted[len(prices_sorted)//2:])  # Kuartil ketiga (Q3)
-    iqr = q3 - q1
-
-    lower_bound = max(0, q1 - 1.5 * iqr)  # Pastikan batas bawah tidak negatif
-    upper_bound = q3 + 1.5 * iqr
-
-    filtered_prices = [p for p in prices if lower_bound <= p <= upper_bound]
-
-    return filtered_prices if filtered_prices else prices
-
 def get_min_reasonable_price(prices):
-    """Menentukan harga terendah yang masuk akal berdasarkan distribusi harga."""
+    """Menentukan batas harga minimum yang masuk akal."""
     if len(prices) < 4:
-        return min(prices) if prices else 0  # Gunakan harga minimum jika dataset kecil
+        return min(prices) if prices else 0  # Jika sedikit data, gunakan harga minimum
 
-    q1 = median(prices[:len(prices)//2])  # Kuartil pertama sebagai batas bawah
-    return q1
+    sorted_prices = sorted(prices)
+    q1 = median(sorted_prices[:len(sorted_prices)//2])  # Kuartil pertama (Q1)
+    median_price = median(sorted_prices)  # Median harga
+
+    # Harga minimum harus minimal setengah dari median
+    min_reasonable = max(q1, median_price / 2)
+
+    # Jika Q1 masih terlalu kecil, gunakan median sebagai batas harga minimum
+    if min_reasonable < median_price / 2:
+        min_reasonable = median_price / 2
+
+    return round(min_reasonable)
 
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia dan merata-ratakan harga valid."""
