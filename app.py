@@ -126,10 +126,8 @@ def clean_price_format(price_str):
     # Hapus karakter selain angka dan titik
     price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
 
-    # Ambil hanya dua bagian pertama jika ada lebih dari dua titik
-    parts = price_cleaned.split('.')
-    if len(parts) > 2:
-        price_cleaned = '.'.join(parts[:2])
+    # Ambil hanya bagian utama harga (hindari angka tambahan di belakang)
+    price_cleaned = price_cleaned.split(".")[0]  # Ambil angka utama sebelum titik kedua
 
     # Hapus titik agar bisa dikonversi ke integer
     price_cleaned = price_cleaned.replace('.', '')
@@ -182,12 +180,10 @@ async def scrape_tokopedia_price(query):
     for price in raw_prices:
         price_cleaned = clean_price_format(price)
 
-        try:
-            price_int = int(price_cleaned.replace(".", ""))
-            valid_prices.append(price_int)
-
-        except ValueError:
-            invalid_prices.append(price_cleaned)
+        if price_cleaned is not None:
+            valid_prices.append(price_cleaned)
+        else:
+            invalid_prices.append(price)
 
     logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
     logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
