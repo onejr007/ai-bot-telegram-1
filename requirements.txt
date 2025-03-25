@@ -33,7 +33,6 @@ PyJWT==2.10.1
 pyppeteer==2.0.0
 pyquery==2.0.1
 python-telegram-bot==22.0
-pywin32==310
 requests==2.32.3
 requests-html==0.10.0
 scikit-learn==1.6.1
