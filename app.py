@@ -120,6 +120,7 @@ def extract_prices(text):
 
 def clean_price_format(price_str):
     """Membersihkan format harga dan menghapus angka tambahan setelah titik terakhir dengan benar"""
+    # Hapus karakter selain angka dan titik
     price_cleaned = re.sub(r"[^\d.]", "", price_str.replace("Rp", "").strip())
 
     # Menjaga hanya angka sebelum titik kedua (jika ada lebih dari dua titik)
@@ -127,11 +128,15 @@ def clean_price_format(price_str):
         parts = price_cleaned.split('.')
         price_cleaned = '.'.join(parts[:2])  # Ambil hanya dua bagian pertama
 
+    # Hilangkan titik agar bisa dikonversi ke integer
+    price_cleaned = price_cleaned.replace('.', '')
+
     # Konversi ke angka bulat
     try:
-        return int(price_cleaned.replace('.', ''))  # Hilangkan titik untuk parsing angka
+        return int(price_cleaned)  # Pastikan hasil akhirnya integer
     except ValueError:
         return None  # Jika gagal parsing, return None
+
 
 def remove_outliers(prices):
     """Menghapus outlier menggunakan metode interquartile range (IQR)"""
