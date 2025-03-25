@@ -15,7 +15,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, InlineQuer
 from telegram import InlineQueryResultArticle, InputTextMessageContent
 from collections import Counter
 from requests_html import AsyncHTMLSession
-from statistics import mean
+from statistics import mean, median
 
 nest_asyncio.apply()
 
