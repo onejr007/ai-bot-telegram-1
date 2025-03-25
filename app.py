@@ -37,6 +37,8 @@ def get_headers(site):
     return {
         "User-Agent": random.choice(USER_AGENTS),
         "Referer": referers.get(site, "https://google.com/"),  # Default ke Google jika tidak dikenal
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "X-Requested-With": "XMLHttpRequest",
     }
 
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
