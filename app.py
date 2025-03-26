@@ -222,39 +222,26 @@ async def scrape_shopee_price(query):
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-    all_text = soup.get_text()
 
-    try:
-        raw_prices = extract_prices(all_text)  
-        logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
+    # Mencari elemen harga berdasarkan class baru yang ditemukan
+    price_elements = soup.find_all("span", class_="font-medium text-base/5 truncate")
+    
+    raw_prices = [price.get_text(strip=True) for price in price_elements]
+    logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
 
-        cleaned_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
-        logging.info(f"✅ Harga setelah cleaning: {cleaned_prices}")
+    # Bersihkan dan ubah ke integer
+    cleaned_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
+    logging.info(f"✅ Harga setelah cleaning: {cleaned_prices}")
 
-        if not cleaned_prices:
-            logging.warning(f"❌ Tidak menemukan harga yang bisa digunakan untuk '{query}' di Shopee")
-            return []
-
-        # Tentukan batas harga terendah yang masuk akal
-        min_reasonable_price = get_min_reasonable_price(cleaned_prices)
-        logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
-
-        # Filter harga yang lebih rendah dari batas masuk akal
-        filtered_prices = [p for p in cleaned_prices if p >= min_reasonable_price]
-        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
-
-        if not filtered_prices:
-            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
-            return []
-
-        avg_price = round(mean(filtered_prices))
-        logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
-
-        return [f"Rp{avg_price:,}".replace(",", ".")]
-
-    except Exception as e:
-        logging.error(f"⚠️ Error saat scraping Shopee: {e}")
+    if not cleaned_prices:
+        logging.warning(f"❌ Tidak menemukan harga yang bisa digunakan untuk '{query}' di Shopee")
         return []
+
+    # Tentukan harga rata-rata
+    avg_price = round(mean(cleaned_prices))
+    logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
+
+    return [f"Rp{avg_price:,}".replace(",", ".")]
 
 async def scrape_bukalapak_price(query):
     """Scraping harga dari Bukalapak menggunakan JSON API."""
