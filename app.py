@@ -25,6 +25,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+
 ]
 
 def get_headers(site):
@@ -211,43 +212,49 @@ async def scrape_tokopedia_price(query):
     return [f"Rp{avg_price:,}".replace(",", ".")]
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee menggunakan API JSON"""
-    query_encoded = query.replace(" ", "%20")
-    api_url = f"https://shopee.co.id/api/v4/search/search_items?by=relevancy&keyword={query_encoded}&limit=30&newest=0&order=desc&page_type=search"
-    
-    response = requests.get(api_url, headers=get_headers("shopee"))
-    
+    """Scraping harga dari Shopee tanpa API."""
+    search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
+    response = requests.get(search_url, headers=get_headers("shopee"))
+    logging.info(f"🔗 Link Shopee : '{search_url}'")
+
     if response.status_code != 200:
         logging.warning(f"⚠️ Gagal mengakses Shopee (status {response.status_code})")
         return []
 
-    data = response.json()
+    soup = BeautifulSoup(response.text, "html.parser")
+    all_text = soup.get_text()
 
-    # Ambil semua harga dari hasil pencarian
-    prices = [item["item_basic"]["price"] // 100000 for item in data.get("items", [])]
+    try:
+        raw_prices = extract_prices(all_text)  
+        logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
 
-    if not prices:
-        logging.warning(f"❌ Tidak menemukan harga untuk '{query}' di Shopee")
+        cleaned_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
+        logging.info(f"✅ Harga setelah cleaning: {cleaned_prices}")
+
+        if not cleaned_prices:
+            logging.warning(f"❌ Tidak menemukan harga yang bisa digunakan untuk '{query}' di Shopee")
+            return []
+
+        # Tentukan batas harga terendah yang masuk akal
+        min_reasonable_price = get_min_reasonable_price(cleaned_prices)
+        logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
+
+        # Filter harga yang lebih rendah dari batas masuk akal
+        filtered_prices = [p for p in cleaned_prices if p >= min_reasonable_price]
+        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
+
+        if not filtered_prices:
+            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
+            return []
+
+        avg_price = round(mean(filtered_prices))
+        logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
+
+        return [f"Rp{avg_price:,}".replace(",", ".")]
+
+    except Exception as e:
+        logging.error(f"⚠️ Error saat scraping Shopee: {e}")
         return []
-
-    logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {prices}")
-
-    # Tentukan batas harga minimum yang masuk akal
-    min_reasonable_price = get_min_reasonable_price(prices)
-    logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
-
-    # Filter harga yang lebih rendah dari batas masuk akal
-    filtered_prices = [p for p in prices if p >= min_reasonable_price]
-    logging.info(f"✅ Harga setelah filter: {filtered_prices}")
-
-    if not filtered_prices:
-        logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
-        return []
-
-    avg_price = round(mean(filtered_prices))
-    logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
-
-    return [f"Rp{avg_price:,}".replace(",", ".")]
 
 async def scrape_bukalapak_price(query):
     """Scraping harga dari Bukalapak menggunakan JSON API."""
