@@ -25,6 +25,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 
 ]
 
@@ -40,6 +41,8 @@ def get_headers(site):
         "Referer": referers.get(site, "https://google.com/"),  # Default ke Google jika tidak dikenal
         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
         "X-Requested-With": "XMLHttpRequest",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Connection": "keep-alive",
     }
 
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
@@ -212,41 +215,64 @@ async def scrape_tokopedia_price(query):
     return [f"Rp{avg_price:,}".replace(",", ".")]
 
 async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee tanpa API."""
+    """Scraping harga dari Shopee berdasarkan struktur HTML terbaru."""
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "id,en;q=0.9",
         "Referer": "https://shopee.co.id/",
+        "Connection": "keep-alive",
     }
 
-    response = requests.get(search_url, headers=headers)
-    if response.status_code != 200:
-        print(f"⚠️ Gagal mengakses Shopee (status {response.status_code})")
+    try:
+        response = requests.get(search_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            logging.error(f"❌ Gagal mengakses Shopee untuk '{query}' (status {response.status_code})")
+            return []
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Selektor spesifik berdasarkan HTML yang diberikan
+        price_elements = soup.select("li.shopee-search-item-result__item span.font-medium.text-base\/5.truncate")
+
+        if not price_elements:
+            logging.warning(f"⚠️ Tidak menemukan elemen harga untuk '{query}' dengan selektor spesifik")
+            logging.debug(f"HTML sample: {soup.prettify()[:1000]}")
+            return []
+
+        raw_prices = [price.get_text(strip=True) for price in price_elements if price.get_text(strip=True)]
+        logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
+
+        # Bersihkan harga menggunakan fungsi yang sudah ada
+        valid_prices = [clean_price_format(f"Rp{price}") for price in raw_prices if clean_price_format(f"Rp{price}") is not None]
+        logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
+
+        if not valid_prices:
+            logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Shopee")
+            return []
+
+        # Tentukan batas harga terendah yang masuk akal
+        min_reasonable_price = get_min_reasonable_price(valid_prices)
+        logging.info(f"📉 Harga terendah yang masuk akal: {min_reasonable_price}")
+
+        # Filter harga
+        filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
+        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
+
+        if not filtered_prices:
+            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
+            return []
+
+        # Hitung rata-rata
+        avg_price = round(mean(filtered_prices))
+        logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
+
+        return [f"Rp{avg_price:,}".replace(",", ".")]
+
+    except Exception as e:
+        logging.error(f"❌ Gagal scraping Shopee untuk '{query}': {str(e)}")
         return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Coba cari harga di elemen yang sesuai
-    price_elements = soup.select("span.font-medium.text-base\\/5.truncate")
-
-    raw_prices = [price.get_text(strip=True) for price in price_elements]
-    print(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
-
-    # Bersihkan format harga
-    cleaned_prices = [int(price.replace(".", "").replace(",", "").replace("Rp", "").strip()) for price in raw_prices if price]
-    print(f"✅ Harga setelah cleaning: {cleaned_prices}")
-
-    if not cleaned_prices:
-        print(f"❌ Tidak menemukan harga yang bisa digunakan untuk '{query}' di Shopee")
-        return []
-
-    # Hitung rata-rata harga
-    avg_price = sum(cleaned_prices) // len(cleaned_prices)
-    print(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
-
-    return [f"Rp{avg_price:,}".replace(",", ".")]
-
 async def scrape_bukalapak_price(query):
     """Scraping harga dari Bukalapak menggunakan JSON API."""
     query = normalize_price_query(query)
