@@ -40,6 +40,8 @@ def get_headers(site):
         "priceza": "https://www.priceza.co.id/",
         "bukalapak": "https://www.bukalapak.com/",
         "blibli": "https://www.blibli.com/",
+        "free-proxy": "https://free-proxy-list.net/",
+        "proxyscrape": "https://api.proxyscrape.com/",
     }
     
     return {
@@ -60,31 +62,59 @@ def get_headers(site):
 
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
-def get_chrome_options(headless=True, proxy=None, custom_user_agent=None):
-    """Mengembalikan objek Chrome Options yang dikonfigurasi secara dinamis."""
+def fetch_proxies_from_free_proxy_list():
+    """Mengambil proxy dari free-proxy-list.net"""
+    url = "https://free-proxy-list.net/"
+    try:
+        response = requests.get(url, headers=get_headers("free-proxy"), timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        proxies = []
+        for row in soup.select("#list tbody tr")[:10]:  # Ambil 10 proxy pertama
+            cols = row.find_all("td")
+            ip = cols[0].text
+            port = cols[1].text
+            proxies.append(f"{ip}:{port}")
+        logger.info(f"Berhasil mengambil {len(proxies)} proxy dari free-proxy-list.net")
+        return proxies
+    except Exception as e:
+        logger.error(f"Gagal mengambil proxy dari free-proxy-list.net: {str(e)}")
+        return []
+
+def fetch_proxies_from_proxyscrape():
+    """Mengambil proxy dari proxyscrape.com"""
+    url = "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&country=all"
+    try:
+        response = requests.get(url, headers=get_headers("proxyscrape"), timeout=10)
+        response.raise_for_status()
+        proxies = response.text.splitlines()[:10]  # Ambil 10 proxy pertama
+        logger.info(f"Berhasil mengambil {len(proxies)} proxy dari proxyscrape.com")
+        return proxies
+    except Exception as e:
+        logger.error(f"Gagal mengambil proxy dari proxyscrape.com: {str(e)}")
+        return []
+
+def get_free_proxies():
+    """Mengambil proxy dari beberapa sumber dengan backup"""
+    proxies = fetch_proxies_from_free_proxy_list()
+    if not proxies:  # Jika gagal, coba sumber lain
+        logger.warning("Sumber pertama gagal, mencoba sumber cadangan...")
+        proxies = fetch_proxies_from_proxyscrape()
+    return proxies if proxies else ["103.147.76.136:3128"]  # Proxy default jika semua gagal
+
+def get_chrome_options(headless=True, proxy=None):
     options = Options()
-    
-    # Pengaturan default untuk headless dan container
     if headless:
         options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    
-    # User-Agent: gunakan custom jika diberikan, kalau tidak pilih acak
-    user_agent = custom_user_agent or random.choice(USER_AGENTS)
+    user_agent = random.choice(USER_AGENTS)
     options.add_argument(f"user-agent={user_agent}")
-    
-    # Sembunyikan tanda Selenium
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    
-    # Lokasi binary Chromium (default untuk Railway)
     options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/chromium")
-    
-    # Tambahkan proxy jika ada
     if proxy:
         options.add_argument(f"--proxy-server={proxy}")
-    
     return options
 
 # Konfigurasi logger
@@ -369,70 +399,64 @@ async def scrape_bukalapak_price(query):
         return []
 
 async def scrape_blibli_price(query):
-    """Scraping harga dari Blibli menggunakan Selenium."""
+    """Scraping harga dari Blibli dengan failover proxy"""
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
-    
-    # Panggil fungsi untuk mendapatkan chrome_options
-    chrome_options = get_chrome_options(headless=True)
-    
-    logger.info(f"🔄 Scraping harga dari Blibli untuk '{query}' dengan Selenium...")
-    logger.debug(f"URL awal: {search_url}")
+    proxies = get_free_proxies()  # Ambil daftar proxy
+    logger.info(f"Daftar proxy yang akan digunakan: {proxies}")
 
-    driver = None
-    try:
-        service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        
-        # Sembunyikan navigator.webdriver
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        driver.get(search_url)
-        await asyncio.sleep(5)
-        logger.info(f"URL setelah memuat: {driver.current_url}")
+    for proxy in proxies:
+        logger.info(f"Mencoba proxy: {proxy}")
+        chrome_options = get_chrome_options(headless=True, proxy=proxy)
+        driver = None
+        try:
+            service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            driver.set_page_load_timeout(15)  # Timeout 15 detik
+            driver.get(search_url)
+            await asyncio.sleep(5)
+            current_url = driver.current_url
+            logger.info(f"URL setelah memuat: {current_url}")
 
-        if "challenge" in driver.current_url:
-            logger.warning("⚠️ Terdeteksi halaman challenge anti-bot di Blibli")
-            return []
+            if "challenge" in current_url:
+                logger.warning(f"⚠️ Terdeteksi halaman challenge dengan proxy {proxy}")
+                continue  # Coba proxy berikutnya
 
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        all_text = soup.get_text()
-        raw_prices = re.findall(r"Rp[\s]?[\d,.]+", all_text)
-        logger.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            all_text = soup.get_text()
+            raw_prices = re.findall(r"Rp[\s]?[\d,.]+", all_text)
+            logger.info(f"🔍 Harga mentah ditemukan: {raw_prices}")
 
-        if not raw_prices:
-            logger.warning(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
-            logger.debug(f"HTML sample: {soup.prettify()[:2000]}")
-            return []
+            if not raw_prices:
+                logger.warning(f"⚠️ Tidak menemukan teks harga dengan 'Rp' menggunakan proxy {proxy}")
+                continue
 
-        valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
-        logger.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
+            valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
+            if not valid_prices:
+                logger.warning(f"❌ Tidak ada harga valid dengan proxy {proxy}")
+                continue
 
-        if not valid_prices:
-            logger.warning(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
-            return []
+            min_reasonable_price = get_min_reasonable_price(valid_prices)
+            filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
+            if not filtered_prices:
+                logger.warning(f"❌ Tidak ada harga yang masuk akal dengan proxy {proxy}")
+                continue
 
-        min_reasonable_price = get_min_reasonable_price(valid_prices)
-        logger.info(f"📉 Harga terendah yang masuk akal: {min_reasonable_price}")
+            avg_price = round(mean(filtered_prices))
+            logger.info(f"✅ Harga rata-rata: Rp{avg_price:,}")
+            return [f"Rp{avg_price:,}".replace(",", ".")]
 
-        filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
-        logger.info(f"✅ Harga setelah filter: {filtered_prices}")
+        except Exception as e:
+            logger.error(f"❌ Gagal dengan proxy {proxy}: {str(e)}")
+            continue  # Coba proxy berikutnya
+        finally:
+            if driver is not None:
+                driver.quit()
 
-        if not filtered_prices:
-            logger.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering")
-            return []
+    logger.error("❌ Semua proxy gagal atau terdeteksi challenge")
+    return []
 
-        avg_price = round(mean(filtered_prices))
-        logger.info(f"✅ Harga rata-rata di Blibli: Rp{avg_price:,}")
-
-        return [f"Rp{avg_price:,}".replace(",", ".")]
-
-    except Exception as e:
-        logger.error(f"❌ Gagal scraping Blibli: {str(e)}")
-        return []
-    finally:
-        if driver is not None:
-            driver.quit()   
-                
 async def scrape_digimap_price(query):
     """Scraping harga dari Digimap menggunakan HTML parsing."""
     query = normalize_price_query(query)
