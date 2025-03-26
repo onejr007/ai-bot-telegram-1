@@ -42,7 +42,7 @@ def get_headers(site):
         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Connection": "keep-alive",
+        "Connection": "keep-alive"
     }
 
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
@@ -176,12 +176,11 @@ def get_min_reasonable_price(prices):
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia dan merata-ratakan harga valid."""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
+    logging.info(f"🔄 Scraping harga dari Tokopedia untuk '{query}'...")
+    logging.info(f"URL: {search_url}")
         
     try:
         response = requests.get(search_url, headers=get_headers("tokopedia"), timeout=10)
-
-        logging.info(f"Link Tokped : '{search_url}'")
-
         if response.status_code != 200:
             logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
             return []
@@ -221,33 +220,51 @@ async def scrape_tokopedia_price(query):
         return []
 
 async def scrape_lazada_price(query):
-    """Scraping harga dari Lazada."""
+    """Scraping harga dari Lazada dengan mencari teks yang diawali 'Rp'."""
     search_url = f"https://www.lazada.co.id/catalog/?q={query.replace(' ', '+')}"
+    logging.info(f"🔄 Scraping harga dari Lazada untuk '{query}'...")
+    logging.info(f"URL: {search_url}")
+
     try:
-        response = requests.get(search_url, headers=get_headers("lazada"), timeout=10)
+        response = requests.get(search_url, headers=get_headers("lazada"), timeout=10, allow_redirects=True)
         if response.status_code != 200:
             logging.error(f"❌ Gagal mengakses Lazada (status {response.status_code})")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        price_elements = soup.select("div[data-qa-locator='product-item'] span[class*='price']")
+        logging.info(f"URL setelah redirect: {response.url}")
 
-        if not price_elements:
-            logging.warning(f"⚠️ Tidak menemukan elemen harga untuk '{query}' di Lazada")
+        # Cari semua elemen yang mengandung teks dengan "Rp" menggunakan regex pada seluruh teks HTML
+        all_text = soup.get_text()
+        raw_prices = re.findall(r"Rp[\s]?[\d,.]+", all_text)
+        logging.info(f"🔍 Harga mentah ditemukan di Lazada untuk '{query}': {raw_prices}")
+
+        if not raw_prices:
+            logging.warning(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
             logging.debug(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
-        raw_prices = [price.get_text(strip=True) for price in price_elements]
-        logging.info(f"🔍 Harga mentah di Lazada untuk '{query}': {raw_prices}")
-
+        # Bersihkan harga menggunakan fungsi yang sudah ada
         valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
         logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
+            logging.warning(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
             return []
 
+        # Tentukan batas harga terendah yang masuk akal
         min_reasonable_price = get_min_reasonable_price(valid_prices)
+        logging.info(f"📉 Harga terendah yang masuk akal: {min_reasonable_price}")
+
+        # Filter harga
         filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
+        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
+
+        if not filtered_prices:
+            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering")
+            return []
+
+        # Hitung rata-rata
         avg_price = round(mean(filtered_prices))
         logging.info(f"✅ Harga rata-rata di Lazada: Rp{avg_price:,}")
 
