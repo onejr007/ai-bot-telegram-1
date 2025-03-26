@@ -48,7 +48,7 @@ def get_headers(site):
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
 # Konfigurasi logger
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logger.info, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 CHAT_HISTORY_FILE = "chat_history.json"
@@ -75,13 +75,13 @@ def train_markov():
             text_data = f.read().strip()
         
         if not text_data or len(text_data.split()) < 5:
-            logging.info("⚠️ Tidak cukup data untuk model Markov! Menggunakan dataset default.")
+            logger.info("⚠️ Tidak cukup data untuk model Markov! Menggunakan dataset default.")
             text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
 
         return markovify.Text(text_data, state_size=2)
     
     except FileNotFoundError:
-        logging.info("❌ File history_chat.txt tidak ditemukan. Menggunakan model default.")
+        logger.info("❌ File history_chat.txt tidak ditemukan. Menggunakan model default.")
         text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
         return markovify.Text(text_data, state_size=2)
 
@@ -92,13 +92,13 @@ def predict_markov(query):
         prediction = model.make_sentence(tries=10)  # Coba prediksi hingga 10 kali
         
         if not prediction:
-            logging.info(f"⚠️ Tidak ada prediksi Markov untuk: {query}")
+            logger.info(f"⚠️ Tidak ada prediksi Markov untuk: {query}")
             return ""
         
         return prediction
     
     except Exception as e:
-        logging.info(f"❌ Gagal memprediksi dengan Markov: {e}")
+        logger.info(f"❌ Gagal memprediksi dengan Markov: {e}")
         return ""
 
 def add_to_history(text):
@@ -176,102 +176,102 @@ def get_min_reasonable_price(prices):
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia dan merata-ratakan harga valid."""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
-    logging.info(f"🔄 Scraping harga dari Tokopedia untuk '{query}'...")
-    logging.info(f"URL: {search_url}")
+    logger.info(f"🔄 Scraping harga dari Tokopedia untuk '{query}'...")
+    logger.info(f"URL: {search_url}")
         
     try:
         response = requests.get(search_url, headers=get_headers("tokopedia"), timeout=10)
         if response.status_code != 200:
-            logging.info(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
+            logger.info(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
         all_text = soup.get_text()
 
         raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
-        logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
+        logger.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
 
         valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
-        logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
+        logger.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
-            logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
+            logger.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
             return []
 
         # Tentukan batas harga terendah yang masuk akal
         min_reasonable_price = get_min_reasonable_price(valid_prices)
-        logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
+        logger.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
 
         # Filter harga yang lebih rendah dari batas masuk akal
         filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
-        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
+        logger.info(f"✅ Harga setelah filter: {filtered_prices}")
 
         if not filtered_prices:
-            logging.info(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
+            logger.info(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
             return []
 
         avg_price = round(mean(filtered_prices))
-        logging.info(f"✅ Harga rata-rata di Tokopedia untuk '{query}': Rp{avg_price:,}")
+        logger.info(f"✅ Harga rata-rata di Tokopedia untuk '{query}': Rp{avg_price:,}")
         
         return [f"Rp{avg_price:,}".replace(",", ".")]
     
     except Exception as e:
-        logging.info(f"❌ Gagal scraping Tokopedia untuk '{query}': {str(e)}")
+        logger.info(f"❌ Gagal scraping Tokopedia untuk '{query}': {str(e)}")
         return []
 
 async def scrape_lazada_price(query):
     """Scraping harga dari Lazada dengan mencari teks yang diawali 'Rp'."""
     search_url = f"https://www.lazada.co.id/catalog/?q={query.replace(' ', '+')}"
-    logging.info(f"🔄 Scraping harga dari Lazada untuk '{query}'...")
-    logging.info(f"URL: {search_url}")
+    logger.info(f"🔄 Scraping harga dari Lazada untuk '{query}'...")
+    logger.info(f"URL: {search_url}")
 
     try:
         response = requests.get(search_url, headers=get_headers("lazada"), timeout=10, allow_redirects=True)
         if response.status_code != 200:
-            logging.info(f"❌ Gagal mengakses Lazada (status {response.status_code})")
+            logger.info(f"❌ Gagal mengakses Lazada (status {response.status_code})")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        logging.info(f"URL setelah redirect: {response.url}")
+        logger.info(f"URL setelah redirect: {response.url}")
 
         # Cari semua elemen yang mengandung teks dengan "Rp" menggunakan regex pada seluruh teks HTML
         all_text = soup.get_text()
         raw_prices = re.findall(r"Rp[\s]?[\d,.]+", all_text)
-        logging.info(f"🔍 Harga mentah ditemukan di Lazada untuk '{query}': {raw_prices}")
+        logger.info(f"🔍 Harga mentah ditemukan di Lazada untuk '{query}': {raw_prices}")
 
         if not raw_prices:
-            logging.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
-            logging.info(f"HTML sample: {soup.prettify()[:2000]}")
+            logger.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
+            logger.info(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
         # Bersihkan harga menggunakan fungsi yang sudah ada
         valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
-        logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
+        logger.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
-            logging.info(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
+            logger.info(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
             return []
 
         # Tentukan batas harga terendah yang masuk akal
         min_reasonable_price = get_min_reasonable_price(valid_prices)
-        logging.info(f"📉 Harga terendah yang masuk akal: {min_reasonable_price}")
+        logger.info(f"📉 Harga terendah yang masuk akal: {min_reasonable_price}")
 
         # Filter harga
         filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
-        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
+        logger.info(f"✅ Harga setelah filter: {filtered_prices}")
 
         if not filtered_prices:
-            logging.info(f"❌ Tidak ada harga yang masuk akal setelah filtering")
+            logger.info(f"❌ Tidak ada harga yang masuk akal setelah filtering")
             return []
 
         # Hitung rata-rata
         avg_price = round(mean(filtered_prices))
-        logging.info(f"✅ Harga rata-rata di Lazada: Rp{avg_price:,}")
+        logger.info(f"✅ Harga rata-rata di Lazada: Rp{avg_price:,}")
 
         return [f"Rp{avg_price:,}".replace(",", ".")]
 
     except Exception as e:
-        logging.info(f"❌ Gagal scraping Lazada: {str(e)}")
+        logger.info(f"❌ Gagal scraping Lazada: {str(e)}")
         return []
     
 async def scrape_bukalapak_price(query):
@@ -279,10 +279,10 @@ async def scrape_bukalapak_price(query):
     query = normalize_price_query(query)
     search_url = f"https://api.bukalapak.com/multistrategy-products?keywords={query.replace(' ', '+')}&limit=10"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
-    logging.info(f"Link Bukalapak : '{search_url}'")
+    logger.info(f"Link Bukalapak : '{search_url}'")
 
     if response.status_code != 200:
-        logging.info(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
+        logger.info(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
         return []
 
     try:
@@ -290,23 +290,23 @@ async def scrape_bukalapak_price(query):
         products = data.get("data", {}).get("products", [])
         raw_prices = [int(product["price"]) for product in products]
     except Exception as e:
-        logging.info(f"⚠️ Gagal memproses JSON Bukalapak: {e}")
+        logger.info(f"⚠️ Gagal memproses JSON Bukalapak: {e}")
         return []
 
-    logging.info(f"🔍 Harga mentah ditemukan di Bukalapak untuk '{query}': {raw_prices}")
+    logger.info(f"🔍 Harga mentah ditemukan di Bukalapak untuk '{query}': {raw_prices}")
 
     valid_prices = [p for p in raw_prices if 500000 <= p <= 50000000]
     invalid_prices = list(set(raw_prices) - set(valid_prices))
 
-    logging.info(f"✅ Harga valid setelah filtering: {valid_prices}")
-    logging.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
+    logger.info(f"✅ Harga valid setelah filtering: {valid_prices}")
+    logger.info(f"⚠️ Harga tidak valid (diabaikan): {invalid_prices}")
 
     if valid_prices:
         best_price = min(valid_prices)
-        logging.info(f"✅ Harga termurah di Bukalapak untuk '{query}': Rp{best_price:,}")
+        logger.info(f"✅ Harga termurah di Bukalapak untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}"]
 
-    logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Bukalapak")
+    logger.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Bukalapak")
     return []
 
 async def scrape_blibli_price(query):
@@ -314,10 +314,10 @@ async def scrape_blibli_price(query):
     query = normalize_price_query(query)
     search_url = f"https://www.blibli.com/backend/search/products?searchTerm={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
-    logging.info(f"Link Blibli : '{search_url}'")
+    logger.info(f"Link Blibli : '{search_url}'")
 
     if response.status_code != 200:
-        logging.info(f"❌ Gagal mengambil data harga dari Blibli untuk '{query}'")
+        logger.info(f"❌ Gagal mengambil data harga dari Blibli untuk '{query}'")
         return []
 
     try:
@@ -325,19 +325,19 @@ async def scrape_blibli_price(query):
         products = data.get("data", {}).get("products", [])
         raw_prices = [int(product["price"]["value"]) for product in products]
     except Exception as e:
-        logging.info(f"⚠️ Gagal memproses JSON Blibli: {e}")
+        logger.info(f"⚠️ Gagal memproses JSON Blibli: {e}")
         return []
 
-    logging.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
+    logger.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
 
     valid_prices = [p for p in raw_prices if 500000 <= p <= 50000000]
 
     if valid_prices:
         best_price = min(valid_prices)
-        logging.info(f"✅ Harga termurah di Blibli untuk '{query}': Rp{best_price:,}")
+        logger.info(f"✅ Harga termurah di Blibli untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}"]
 
-    logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Blibli")
+    logger.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Blibli")
     return []
 
 async def scrape_digimap_price(query):
@@ -345,59 +345,59 @@ async def scrape_digimap_price(query):
     query = normalize_price_query(query)
     search_url = f"https://www.digimap.co.id/search?type=product&q={query.replace(' ', '+')}"
     response = requests.get(search_url, headers=HEADERS, timeout=10)
-    logging.info(f"Link Digimap : '{search_url}'")
+    logger.info(f"Link Digimap : '{search_url}'")
 
     if response.status_code != 200:
-        logging.info(f"❌ Gagal mengambil data harga dari Digimap untuk '{query}'")
+        logger.info(f"❌ Gagal mengambil data harga dari Digimap untuk '{query}'")
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
     price_elements = soup.select("span.money")
 
     raw_prices = [price.get_text() for price in price_elements]
-    logging.info(f"🔍 Harga mentah ditemukan di Digimap untuk '{query}': {raw_prices}")
+    logger.info(f"🔍 Harga mentah ditemukan di Digimap untuk '{query}': {raw_prices}")
 
     valid_prices = [int(re.sub(r"[^\d]", "", price)) for price in raw_prices if 500000 <= int(re.sub(r"[^\d]", "", price)) <= 50000000]
 
     if valid_prices:
         best_price = min(valid_prices)
-        logging.info(f"✅ Harga termurah di Digimap untuk '{query}': Rp{best_price:,}")
+        logger.info(f"✅ Harga termurah di Digimap untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}"]
 
-    logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Digimap")
+    logger.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Digimap")
     return []
 
 async def scrape_price(query):
     """Menggabungkan semua sumber harga dari berbagai e-commerce"""
-    logging.info(f"🔍 Mencari harga untuk: {query}")
+    logger.info(f"🔍 Mencari harga untuk: {query}")
 
-    logging.info("🔄 Scraping harga dari Tokopedia...")
+    logger.info("🔄 Scraping harga dari Tokopedia...")
     tokopedia_prices = await scrape_tokopedia_price(query)
-    logging.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
+    logger.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
 
-    logging.info("🔄 Scraping harga dari Lazada...")
+    logger.info("🔄 Scraping harga dari Lazada...")
     lazada_prices = await scrape_lazada_price(query)
-    logging.info(f"✅ Hasil Lazada: {lazada_prices}")
+    logger.info(f"✅ Hasil Lazada: {lazada_prices}")
 
-    logging.info("🔄 Scraping harga dari Bukalapak...")
+    logger.info("🔄 Scraping harga dari Bukalapak...")
     bukalapak_prices = await scrape_bukalapak_price(query)
-    logging.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
+    logger.info(f"✅ Hasil Bukalapak: {bukalapak_prices}")
 
-    logging.info("🔄 Scraping harga dari Blibli...")
+    logger.info("🔄 Scraping harga dari Blibli...")
     blibli_prices = await scrape_blibli_price(query)
-    logging.info(f"✅ Hasil Blibli: {blibli_prices}")
+    logger.info(f"✅ Hasil Blibli: {blibli_prices}")
 
-    logging.info("🔄 Scraping harga dari Digimap...")
+    logger.info("🔄 Scraping harga dari Digimap...")
     digimap_prices = await scrape_digimap_price(query)
-    logging.info(f"✅ Hasil Digimap: {digimap_prices}")
+    logger.info(f"✅ Hasil Digimap: {digimap_prices}")
 
     all_prices = tokopedia_prices + lazada_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
     unique_prices = sorted(set(all_prices))
 
     if not unique_prices:
-        logging.info(f"❌ Tidak menemukan harga untuk '{query}'")
+        logger.info(f"❌ Tidak menemukan harga untuk '{query}'")
     else:
-        logging.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
+        logger.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
 
     return unique_prices[:5] if unique_prices else None
 
