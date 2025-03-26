@@ -337,7 +337,7 @@ async def scrape_bukalapak_price(query):
 
 async def scrape_blibli_price(query):
     """Scraping harga dari Blibli dengan mencari teks yang diawali 'Rp'."""
-    search_url = f"https://www.blibli.com/cari/{query.replace(' ', '-')}"
+    search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
     logger.info(f"🔄 Scraping harga dari Blibli untuk '{query}'...")
     logger.info(f"URL awal: {search_url}")
 
