@@ -13,9 +13,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
-from telegram import Update
+from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
-from telegram import InlineQueryResultArticle, InputTextMessageContent
 from collections import Counter
 from requests_html import AsyncHTMLSession
 from statistics import mean, median
@@ -636,12 +635,24 @@ def normalize_price_query(text):
 async def animate_search_message(message, stop_event):
     """Memperbarui pesan dengan animasi titik-titik hingga stop_event di-set."""
     dots = ["🔍 Mencari harga.", "🔍 Mencari harga..", "🔍 Mencari harga..."]
+    current_text = None  # Track the current message content
     idx = 0
     while not stop_event.is_set():
-        await message.edit_text(dots[idx % 3])  # Siklus melalui 3 variasi
+        new_text = dots[idx % 3]
+        if new_text != current_text:  # Only edit if the text is different
+            try:
+                await message.edit_text(new_text)
+                current_text = new_text  # Update the tracked content
+            except telegram.error.BadRequest as e:
+                if "Message is not modified" in str(e):
+                    pass  # Ignore the error silently
+                else:
+                    logger.error(f"❌ Error saat mengedit pesan: {str(e)}")
+            except Exception as e:
+                logger.error(f"❌ Error tak terduga saat mengedit pesan: {str(e)}")
         idx += 1
         await asyncio.sleep(0.5)  # Update setiap 0.5 detik
-
+        
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
 
