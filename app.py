@@ -214,32 +214,36 @@ async def scrape_tokopedia_price(query):
 async def scrape_shopee_price(query):
     """Scraping harga dari Shopee tanpa API."""
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
-    response = requests.get(search_url, headers=get_headers("shopee"))
-    logging.info(f"🔗 Link Shopee : '{search_url}'")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "id,en;q=0.9",
+        "Referer": "https://shopee.co.id/",
+    }
 
+    response = requests.get(search_url, headers=headers)
     if response.status_code != 200:
-        logging.warning(f"⚠️ Gagal mengakses Shopee (status {response.status_code})")
+        print(f"⚠️ Gagal mengakses Shopee (status {response.status_code})")
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # Mencari elemen harga berdasarkan class baru yang ditemukan
-    price_elements = soup.find_all("span", class_="font-medium text-base/5 truncate")
-    
-    raw_prices = [price.get_text(strip=True) for price in price_elements]
-    logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
+    # Coba cari harga di elemen yang sesuai
+    price_elements = soup.select("span.font-medium.text-base\\/5.truncate")
 
-    # Bersihkan dan ubah ke integer
-    cleaned_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
-    logging.info(f"✅ Harga setelah cleaning: {cleaned_prices}")
+    raw_prices = [price.get_text(strip=True) for price in price_elements]
+    print(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
+
+    # Bersihkan format harga
+    cleaned_prices = [int(price.replace(".", "").replace(",", "").replace("Rp", "").strip()) for price in raw_prices if price]
+    print(f"✅ Harga setelah cleaning: {cleaned_prices}")
 
     if not cleaned_prices:
-        logging.warning(f"❌ Tidak menemukan harga yang bisa digunakan untuk '{query}' di Shopee")
+        print(f"❌ Tidak menemukan harga yang bisa digunakan untuk '{query}' di Shopee")
         return []
 
-    # Tentukan harga rata-rata
-    avg_price = round(mean(cleaned_prices))
-    logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
+    # Hitung rata-rata harga
+    avg_price = sum(cleaned_prices) // len(cleaned_prices)
+    print(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
 
     return [f"Rp{avg_price:,}".replace(",", ".")]
 
