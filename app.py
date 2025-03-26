@@ -120,12 +120,14 @@ def fetch_proxies_from_proxyscrape():
         return []
 
 def get_free_proxies():
-    """Mengambil proxy dari beberapa sumber dengan backup"""
+    """Mengambil proxy dari beberapa sumber dengan backup, batasi jumlah"""
     proxies = fetch_proxies_from_free_proxy_list()
-    if not proxies:  # Jika gagal, coba sumber lain
+    if not proxies:
         logger.warning("Sumber pertama gagal, mencoba sumber cadangan...")
         proxies = fetch_proxies_from_proxyscrape()
-    return proxies if proxies else ["103.147.76.136:3128"]  # Proxy default jika semua gagal
+    # Batasi ke 5 proxy untuk kecepatan
+    proxies = proxies[:5] if len(proxies) > 5 else proxies
+    return proxies if proxies else ["103.147.76.136:3128"]  # Default proxy
 
 def get_chrome_options(headless=True, proxy=None):
     options = Options()
@@ -424,70 +426,86 @@ async def scrape_bukalapak_price(query):
         return []
 
 async def scrape_blibli_price(query):
-    """Scraping harga dari Blibli dengan failover proxy"""
+    """Scraping harga dari Blibli: tanpa proxy dulu, fallback ke proxy jika challenge terdeteksi"""
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
-    proxies = get_free_proxies()
-    logger.info(f"Daftar proxy yang akan digunakan: {proxies}")
-
+    
+    # Coba tanpa proxy terlebih dahulu
+    logger.info(f"Mencoba scraping Blibli tanpa proxy: {search_url}")
+    result = await try_scrape_blibli(search_url, use_proxy=False)
+    if result is not None:  # Berhasil atau gagal tanpa challenge
+        return result
+    
+    # Jika challenge terdeteksi, coba dengan proxy
+    logger.info("⚠️ Challenge terdeteksi, beralih ke mode proxy...")
+    proxies = get_free_proxies()  # Sudah dibatasi ke 5
+    logger.info(f"Daftar proxy yang akan digunakan (maks 5): {proxies}")
+    
     for proxy in proxies:
         logger.info(f"Mencoba proxy: {proxy}")
-        chrome_options = get_chrome_options(headless=True, proxy=proxy)
-        driver = None
-        try:
-            service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
-            driver.set_page_load_timeout(15)  # Timeout for initial load
-            driver.get(search_url)
-
-            # Tunggu hingga elemen harga muncul (maksimal 10 detik)
-            wait = WebDriverWait(driver, 10)
-            wait.until(EC.presence_of_element_located((By.CLASS_NAME, "blu-product-card__price-final")))
-            logger.info(f"URL setelah memuat: {driver.current_url}")
-
-            if "challenge" in driver.current_url:
-                logger.warning(f"⚠️ Terdeteksi halaman challenge dengan proxy {proxy}")
-                continue
-
-            # Ambil semua elemen harga final
-            price_elements = driver.find_elements(By.CLASS_NAME, "blu-product-card__price-final")
-            raw_prices = [elem.text.strip() for elem in price_elements if elem.text.strip()]
-            logger.info(f"🔍 Harga mentah ditemukan: {raw_prices}")
-
-            if not raw_prices:
-                logger.info(f"⚠️ Tidak ada harga ditemukan di halaman dengan proxy {proxy}. Menghentikan pencarian.")
-                return []
-
-            # Bersihkan dan konversi harga ke integer
-            valid_prices = [clean_price_format(f"Rp{price}") for price in raw_prices if clean_price_format(f"Rp{price}") is not None]
-            if not valid_prices:
-                logger.info(f"❌ Tidak ada harga valid setelah cleaning dengan proxy {proxy}. Menghentikan pencarian.")
-                return []
-
-            # Filter harga yang masuk akal
-            min_reasonable_price = get_min_reasonable_price(valid_prices)
-            filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
-            if not filtered_prices:
-                logger.info(f"❌ Tidak ada harga yang masuk akal setelah filtering dengan proxy {proxy}. Menghentikan pencarian.")
-                return []
-
-            # Hitung rata-rata
-            avg_price = round(mean(filtered_prices))
-            logger.info(f"✅ Harga rata-rata: Rp{avg_price:,}")
-            return [f"Rp{avg_price:,}".replace(",", ".")]
-
-        except Exception as e:
-            error_message = getattr(e, 'msg', str(e).split('\n')[0])
-            logger.error(f"❌ Gagal dengan proxy {proxy}: {error_message}")
-            continue
-        finally:
-            if driver is not None:
-                driver.quit()
-
-    logger.error("❌ Semua proxy gagal atau tidak menemukan harga")
+        result = await try_scrape_blibli(search_url, use_proxy=True, proxy=proxy)
+        if result is not None:  # Berhasil atau gagal tanpa challenge
+            return result
+    
+    logger.error("❌ Semua percobaan gagal atau tidak menemukan harga")
     return []
 
+async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
+    """Helper function untuk mencoba scraping dengan atau tanpa proxy"""
+    chrome_options = get_chrome_options(headless=True, proxy=proxy if use_proxy else None)
+    chrome_options.add_argument("--page-load-strategy=eager")  # Percepat loading
+    driver = None
+    try:
+        service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        driver.set_page_load_timeout(8)  # Timeout cepat: 8 detik
+        driver.get(search_url)
+
+        # Tunggu elemen harga (maks 5 detik)
+        wait = WebDriverWait(driver, 5)
+        wait.until(EC.presence_of_element_located((By.CLASS_NAME, "blu-product-card__price-final")))
+        logger.info(f"URL setelah memuat{' (dengan proxy ' + proxy + ')' if use_proxy else ''}: {driver.current_url}")
+
+        if "challenge" in driver.current_url:
+            logger.warning(f"⚠️ Terdeteksi halaman challenge{' dengan proxy ' + proxy if use_proxy else ' tanpa proxy'}")
+            return None  # Signal untuk coba opsi lain
+
+        # Ambil harga
+        price_elements = driver.find_elements(By.CLASS_NAME, "blu-product-card__price-final")
+        raw_prices = [elem.text.strip() for elem in price_elements if elem.text.strip()]
+        logger.info(f"🔍 Harga mentah ditemukan: {raw_prices}")
+
+        if not raw_prices:
+            logger.info(f"⚠️ Tidak ada harga ditemukan di halaman{' dengan proxy ' + proxy if use_proxy else ' tanpa proxy'}.")
+            return []
+
+        # Bersihkan dan konversi harga
+        valid_prices = [clean_price_format(f"Rp{price}") for price in raw_prices if clean_price_format(f"Rp{price}") is not None]
+        if not valid_prices:
+            logger.info(f"❌ Tidak ada harga valid setelah cleaning{' dengan proxy ' + proxy if use_proxy else ' tanpa proxy'}.")
+            return []
+
+        # Filter harga yang masuk akal
+        min_reasonable_price = get_min_reasonable_price(valid_prices)
+        filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
+        if not filtered_prices:
+            logger.info(f"❌ Tidak ada harga yang masuk akal setelah filtering{' dengan proxy ' + proxy if use_proxy else ' tanpa proxy'}.")
+            return []
+
+        # Hitung rata-rata
+        avg_price = round(mean(filtered_prices))
+        logger.info(f"✅ Harga rata-rata: Rp{avg_price:,}")
+        return [f"Rp{avg_price:,}".replace(",", ".")]
+
+    except Exception as e:
+        error_message = getattr(e, 'msg', str(e).split('\n')[0])
+        logger.error(f"❌ Gagal{' dengan proxy ' + proxy if use_proxy else ' tanpa proxy'}: {error_message}")
+        return [] if "challenge" not in error_message.lower() else None  # None untuk challenge, [] untuk kegagalan lain
+    finally:
+        if driver is not None:
+            driver.quit()
+            
 async def scrape_digimap_price(query):
     """Scraping harga dari Digimap menggunakan HTML parsing."""
     query = normalize_price_query(query)
