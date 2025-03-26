@@ -176,53 +176,57 @@ def get_min_reasonable_price(prices):
 async def scrape_tokopedia_price(query):
     """Scraping harga dari Tokopedia dan merata-ratakan harga valid."""
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
-    response = requests.get(search_url, headers=get_headers("tokopedia"))
+        
+    try:
+        response = requests.get(search_url, headers=get_headers("tokopedia"), timeout=10)
 
-    logging.info(f"Link Tokped : '{search_url}'")
+        logging.info(f"Link Tokped : '{search_url}'")
 
-    if response.status_code != 200:
-        logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
-        return []
+        if response.status_code != 200:
+            logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
+            return []
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    all_text = soup.get_text()
+        soup = BeautifulSoup(response.text, "html.parser")
+        all_text = soup.get_text()
 
-    raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
-    logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
+        raw_prices = re.findall(r"Rp[\s]?[\d.,]+", all_text)
+        logging.info(f"🔍 Harga mentah ditemukan di Tokopedia untuk '{query}': {raw_prices}")
 
-    valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
-    logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
+        valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
+        logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
-    if not valid_prices:
-        logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
-        return []
+        if not valid_prices:
+            logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
+            return []
 
-    # Tentukan batas harga terendah yang masuk akal
-    min_reasonable_price = get_min_reasonable_price(valid_prices)
-    logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
+        # Tentukan batas harga terendah yang masuk akal
+        min_reasonable_price = get_min_reasonable_price(valid_prices)
+        logging.info(f"📉 Harga terendah yang masuk akal berdasarkan data: {min_reasonable_price}")
 
-    # Filter harga yang lebih rendah dari batas masuk akal
-    filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
-    logging.info(f"✅ Harga setelah filter: {filtered_prices}")
+        # Filter harga yang lebih rendah dari batas masuk akal
+        filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
+        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
 
-    if not filtered_prices:
-        logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
-        return []
+        if not filtered_prices:
+            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
+            return []
 
-    avg_price = round(mean(filtered_prices))
-    logging.info(f"✅ Harga rata-rata di Tokopedia untuk '{query}': Rp{avg_price:,}")
+        avg_price = round(mean(filtered_prices))
+        logging.info(f"✅ Harga rata-rata di Tokopedia untuk '{query}': Rp{avg_price:,}")
+        
+        return [f"Rp{avg_price:,}".replace(",", ".")]
     
-    return [f"Rp{avg_price:,}".replace(",", ".")]
+    except Exception as e:
+        logging.error(f"❌ Gagal scraping Tokopedia untuk '{query}': {str(e)}")
+        return []
 
 async def scrape_shopee_price(query):
     """Scraping harga dari Shopee berdasarkan struktur HTML terbaru."""
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
-    response = requests.get(search_url, headers=get_headers("shopee"))
-
-    logging.info(f"Link Shopee : '{search_url}'")
 
     try:
-        response = requests.get(search_url, headers=headers, timeout=10)
+        response = requests.get(search_url, headers=get_headers("shopee"), timeout=10)
+        logging.info(f"Link Shopee : '{search_url}'")
         if response.status_code != 200:
             logging.error(f"❌ Gagal mengakses Shopee untuk '{query}' (status {response.status_code})")
             return []
