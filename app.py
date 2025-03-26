@@ -50,16 +50,6 @@ def get_headers(site):
         "Accept-Encoding": "gzip, deflate, br",
     }
 
-    headers = {
-        "User-Agent": ",
-        "Accept-Language": "id,en;q=0.9",
-        "Referer": "https://www.blibli.com/",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Accept-Encoding": "gzip, deflate, br",
-    }
-
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
 # Konfigurasi logger
