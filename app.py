@@ -402,7 +402,7 @@ async def scrape_bukalapak_price(query):
 async def scrape_blibli_price(query):
     """Scraping harga dari Blibli dengan failover proxy"""
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
-    proxies = get_free_proxies()  # Ambil daftar proxy
+    proxies = get_free_proxies()
     logger.info(f"Daftar proxy yang akan digunakan: {proxies}")
 
     for proxy in proxies:
@@ -416,7 +416,7 @@ async def scrape_blibli_price(query):
             
             driver.set_page_load_timeout(15)  # Timeout 15 detik
             driver.get(search_url)
-            await asyncio.sleep(5)
+            await asyncio.sleep(5)  # Tunggu page load
             current_url = driver.current_url
             logger.info(f"URL setelah memuat: {current_url}")
 
@@ -430,32 +430,35 @@ async def scrape_blibli_price(query):
             logger.info(f"🔍 Harga mentah ditemukan: {raw_prices}")
 
             if not raw_prices:
-                logger.warning(f"⚠️ Tidak menemukan teks harga dengan 'Rp' menggunakan proxy {proxy}")
-                continue
+                logger.info(f"⚠️ Tidak ada harga ditemukan di halaman dengan proxy {proxy}. Menghentikan pencarian.")
+                return []  # Stop here; no point in trying more proxies
 
             valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
             if not valid_prices:
-                logger.warning(f"❌ Tidak ada harga valid dengan proxy {proxy}")
-                continue
+                logger.info(f"❌ Tidak ada harga valid setelah cleaning dengan proxy {proxy}. Menghentikan pencarian.")
+                return []  # Stop here; invalid prices mean the scrape worked but found nothing
 
             min_reasonable_price = get_min_reasonable_price(valid_prices)
             filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
             if not filtered_prices:
-                logger.warning(f"❌ Tidak ada harga yang masuk akal dengan proxy {proxy}")
-                continue
+                logger.info(f"❌ Tidak ada harga yang masuk akal setelah filtering dengan proxy {proxy}. Menghentikan pencarian.")
+                return []  # Stop here; filtered out all prices
 
             avg_price = round(mean(filtered_prices))
             logger.info(f"✅ Harga rata-rata: Rp{avg_price:,}")
-            return [f"Rp{avg_price:,}".replace(",", ".")]
+            return [f"Rp{avg_price:,}".replace(",", ".")]  # Success! Return and exit
 
         except Exception as e:
-            logger.error(f"❌ Gagal dengan proxy {proxy}: {str(e)}")
-            continue  # Coba proxy berikutnya
+            # Extract only the main error message, excluding session info and stack trace
+            error_message = getattr(e, 'msg', str(e).split('\n')[0])  # Use .msg if available, else take first line
+            logger.error(f"❌ Gagal dengan proxy {proxy}: {error_message}")
+            continue  # Try the next proxy
+
         finally:
             if driver is not None:
                 driver.quit()
 
-    logger.error("❌ Semua proxy gagal atau terdeteksi challenge")
+    logger.error("❌ Semua proxy gagal atau tidak menemukan harga")
     return []
 
 async def scrape_digimap_price(query):
@@ -654,7 +657,7 @@ async def animate_search_message(message, stop_event):
                 logger.error(f"❌ Error tak terduga saat mengedit pesan: {str(e)}")
         idx += 1
         await asyncio.sleep(0.5)
-        
+
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
 
