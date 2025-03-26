@@ -34,6 +34,7 @@ def get_headers(site):
         "tokopedia": "https://www.tokopedia.com/",
         "shopee": "https://shopee.co.id/",
         "lazada": "https://www.lazada.co.id/",
+        "priceza": "https://www.priceza.co.id/",
     }
     
     return {
@@ -219,32 +220,32 @@ async def scrape_tokopedia_price(query):
         logger.info(f"❌ Gagal scraping Tokopedia untuk '{query}': {str(e)}")
         return []
 
-async def scrape_lazada_price(query):
-    """Scraping harga dari Lazada dengan mencari teks yang diawali 'Rp'."""
-    search_url = f"https://www.lazada.co.id/catalog/?q={query.replace(' ', '+')}"
-    logger.info(f"🔄 Scraping harga dari Lazada untuk '{query}'...")
+async def scrape_priceza_price(query):
+    """Scraping harga dari Priceza dengan mencari teks yang diawali 'Rp'."""
+    search_url = f"https://www.priceza.co.id/s/priceza-search/?search={query.replace(' ', '+')}"
+    logger.info(f"🔄 Scraping harga dari Priceza untuk '{query}'...")
     logger.info(f"URL: {search_url}")
 
     try:
-        response = requests.get(search_url, headers=get_headers("lazada"), timeout=10, allow_redirects=True)
+        response = requests.get(search_url, headers=get_headers("priceza"), timeout=10, allow_redirects=True)
         if response.status_code != 200:
-            logger.info(f"❌ Gagal mengakses Lazada (status {response.status_code})")
+            logging.error(f"❌ Gagal mengakses Priceza (status {response.status_code})")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        logger.info(f"URL setelah redirect: {response.url}")
+        logger.info(f"URL setelah redirect (jika ada): {response.url}")
 
-        # Cari semua elemen yang mengandung teks dengan "Rp" menggunakan regex pada seluruh teks HTML
+        # Cari teks yang diawali "Rp" menggunakan regex
         all_text = soup.get_text()
         raw_prices = re.findall(r"Rp[\s]?[\d,.]+", all_text)
-        logger.info(f"🔍 Harga mentah ditemukan di Lazada untuk '{query}': {raw_prices}")
+        logger.info(f"🔍 Harga mentah ditemukan di Priceza untuk '{query}': {raw_prices}")
 
         if not raw_prices:
             logger.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
             logger.info(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
-        # Bersihkan harga menggunakan fungsi yang sudah ada
+        # Bersihkan harga
         valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
         logger.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
@@ -266,12 +267,12 @@ async def scrape_lazada_price(query):
 
         # Hitung rata-rata
         avg_price = round(mean(filtered_prices))
-        logger.info(f"✅ Harga rata-rata di Lazada: Rp{avg_price:,}")
+        logger.info(f"✅ Harga rata-rata di Priceza: Rp{avg_price:,}")
 
         return [f"Rp{avg_price:,}".replace(",", ".")]
 
     except Exception as e:
-        logger.info(f"❌ Gagal scraping Lazada: {str(e)}")
+        logger.info(f"❌ Gagal scraping Priceza: {str(e)}")
         return []
     
 async def scrape_bukalapak_price(query):
@@ -375,9 +376,9 @@ async def scrape_price(query):
     tokopedia_prices = await scrape_tokopedia_price(query)
     logger.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
 
-    logger.info("🔄 Scraping harga dari Lazada...")
-    lazada_prices = await scrape_lazada_price(query)
-    logger.info(f"✅ Hasil Lazada: {lazada_prices}")
+    logger.info("🔄 Scraping harga dari Priceza...")
+    priceza_prices = await scrape_priceza_price(query)
+    logger.info(f"✅ Hasil Priceza: {priceza_prices}")
 
     logger.info("🔄 Scraping harga dari Bukalapak...")
     bukalapak_prices = await scrape_bukalapak_price(query)
@@ -391,7 +392,7 @@ async def scrape_price(query):
     digimap_prices = await scrape_digimap_price(query)
     logger.info(f"✅ Hasil Digimap: {digimap_prices}")
 
-    all_prices = tokopedia_prices + lazada_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
+    all_prices = tokopedia_prices + priceza_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
     unique_prices = sorted(set(all_prices))
 
     if not unique_prices:
