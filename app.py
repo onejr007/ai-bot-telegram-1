@@ -49,6 +49,7 @@ HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
 # Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 CHAT_HISTORY_FILE = "chat_history.json"
 PRICE_HISTORY_FILE = "price_history.json"
