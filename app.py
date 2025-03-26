@@ -12,6 +12,9 @@ import random
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
@@ -414,46 +417,49 @@ async def scrape_blibli_price(query):
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            driver.set_page_load_timeout(15)  # Timeout 15 detik
+            driver.set_page_load_timeout(15)  # Timeout for initial load
             driver.get(search_url)
-            await asyncio.sleep(5)  # Tunggu page load
-            current_url = driver.current_url
-            logger.info(f"URL setelah memuat: {current_url}")
 
-            if "challenge" in current_url:
+            # Tunggu hingga elemen harga muncul (maksimal 10 detik)
+            wait = WebDriverWait(driver, 10)
+            wait.until(EC.presence_of_element_located((By.CLASS_NAME, "blu-product-card__price-final")))
+            logger.info(f"URL setelah memuat: {driver.current_url}")
+
+            if "challenge" in driver.current_url:
                 logger.warning(f"⚠️ Terdeteksi halaman challenge dengan proxy {proxy}")
-                continue  # Coba proxy berikutnya
+                continue
 
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            all_text = soup.get_text()
-            raw_prices = re.findall(r"Rp[\s]?[\d,.]+", all_text)
+            # Ambil semua elemen harga final
+            price_elements = driver.find_elements(By.CLASS_NAME, "blu-product-card__price-final")
+            raw_prices = [elem.text.strip() for elem in price_elements if elem.text.strip()]
             logger.info(f"🔍 Harga mentah ditemukan: {raw_prices}")
 
             if not raw_prices:
                 logger.info(f"⚠️ Tidak ada harga ditemukan di halaman dengan proxy {proxy}. Menghentikan pencarian.")
-                return []  # Stop here; no point in trying more proxies
+                return []
 
-            valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
+            # Bersihkan dan konversi harga ke integer
+            valid_prices = [clean_price_format(f"Rp{price}") for price in raw_prices if clean_price_format(f"Rp{price}") is not None]
             if not valid_prices:
                 logger.info(f"❌ Tidak ada harga valid setelah cleaning dengan proxy {proxy}. Menghentikan pencarian.")
-                return []  # Stop here; invalid prices mean the scrape worked but found nothing
+                return []
 
+            # Filter harga yang masuk akal
             min_reasonable_price = get_min_reasonable_price(valid_prices)
             filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
             if not filtered_prices:
                 logger.info(f"❌ Tidak ada harga yang masuk akal setelah filtering dengan proxy {proxy}. Menghentikan pencarian.")
-                return []  # Stop here; filtered out all prices
+                return []
 
+            # Hitung rata-rata
             avg_price = round(mean(filtered_prices))
             logger.info(f"✅ Harga rata-rata: Rp{avg_price:,}")
-            return [f"Rp{avg_price:,}".replace(",", ".")]  # Success! Return and exit
+            return [f"Rp{avg_price:,}".replace(",", ".")]
 
         except Exception as e:
-            # Extract only the main error message, excluding session info and stack trace
-            error_message = getattr(e, 'msg', str(e).split('\n')[0])  # Use .msg if available, else take first line
+            error_message = getattr(e, 'msg', str(e).split('\n')[0])
             logger.error(f"❌ Gagal dengan proxy {proxy}: {error_message}")
-            continue  # Try the next proxy
-
+            continue
         finally:
             if driver is not None:
                 driver.quit()
