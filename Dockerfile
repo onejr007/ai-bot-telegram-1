@@ -1,7 +1,7 @@
 # Gunakan base image dengan Python
 FROM python:3.9-slim
 
-# Instal dependensi sistem untuk Chrome dan ChromeDriver
+# Instal dependensi sistem untuk Chrome, ChromeDriver, requests-html, numpy, dan scipy
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
@@ -9,9 +9,15 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     libgconf-2-4 \
     libfontconfig1 \
+    libx11-6 \
+    libx11-xcb1 \
+    libdbus-1-3 \
+    gcc \
+    g++ \
+    libatlas-base-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables
+# Set environment variables untuk Selenium
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_BIN=/usr/bin/chromedriver
 
