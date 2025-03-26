@@ -60,6 +60,33 @@ def get_headers(site):
 
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
+def get_chrome_options(headless=True, proxy=None, custom_user_agent=None):
+    """Mengembalikan objek Chrome Options yang dikonfigurasi secara dinamis."""
+    options = Options()
+    
+    # Pengaturan default untuk headless dan container
+    if headless:
+        options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    
+    # User-Agent: gunakan custom jika diberikan, kalau tidak pilih acak
+    user_agent = custom_user_agent or random.choice(USER_AGENTS)
+    options.add_argument(f"user-agent={user_agent}")
+    
+    # Sembunyikan tanda Selenium
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    
+    # Lokasi binary Chromium (default untuk Railway)
+    options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/chromium")
+    
+    # Tambahkan proxy jika ada
+    if proxy:
+        options.add_argument(f"--proxy-server={proxy}")
+    
+    return options
+
 # Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -254,7 +281,6 @@ async def scrape_priceza_price(query):
 
         if not raw_prices:
             logger.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
-            logger.info(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
         # Bersihkan harga
@@ -310,7 +336,6 @@ async def scrape_bukalapak_price(query):
 
         if not raw_prices:
             logger.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
-            logger.info(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
         # Bersihkan harga
@@ -347,73 +372,67 @@ async def scrape_blibli_price(query):
     """Scraping harga dari Blibli menggunakan Selenium."""
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
     
-    # Konfigurasi Selenium untuk headless mode
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Tanpa UI
-    chrome_options.add_argument("--no-sandbox")  # Penting untuk container
-    chrome_options.add_argument("--disable-dev-shm-usage")  # Hindari masalah memori
-    chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
-    chrome_options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/chromium")  # Default untuk Railway
-
+    # Panggil fungsi untuk mendapatkan chrome_options
+    chrome_options = get_chrome_options(headless=True)
+    
     logger.info(f"🔄 Scraping harga dari Blibli untuk '{query}' dengan Selenium...")
-    logger.info(f"URL awal: {search_url}")
+    logger.debug(f"URL awal: {search_url}")
 
-    driver = None  # Inisialisasi driver sebagai None
+    driver = None
     try:
-        # Gunakan Service untuk menentukan path ChromeDriver
         service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
         driver = webdriver.Chrome(service=service, options=chrome_options)
         
+        # Sembunyikan navigator.webdriver
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
         driver.get(search_url)
-        await asyncio.sleep(5)  # Tunggu 5 detik untuk memuat JavaScript
+        await asyncio.sleep(5)
         logger.info(f"URL setelah memuat: {driver.current_url}")
 
-        # Ambil HTML setelah rendering
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        if "challenge" in driver.current_url:
+            logger.warning("⚠️ Terdeteksi halaman challenge anti-bot di Blibli")
+            return []
 
-        # Cari teks yang diawali "Rp" menggunakan regex
+        soup = BeautifulSoup(driver.page_source, "html.parser")
         all_text = soup.get_text()
         raw_prices = re.findall(r"Rp[\s]?[\d,.]+", all_text)
         logger.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
 
         if not raw_prices:
-            logger.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
-            logger.info(f"HTML sample: {soup.prettify()[:2000]}")
+            logger.warning(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
+            logger.debug(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
-        # Bersihkan harga
         valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
         logger.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
-            logger.info(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
+            logger.warning(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
             return []
 
-        # Tentukan batas harga terendah yang masuk akal
         min_reasonable_price = get_min_reasonable_price(valid_prices)
         logger.info(f"📉 Harga terendah yang masuk akal: {min_reasonable_price}")
 
-        # Filter harga
         filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
         logger.info(f"✅ Harga setelah filter: {filtered_prices}")
 
         if not filtered_prices:
-            logger.info(f"❌ Tidak ada harga yang masuk akal setelah filtering")
+            logger.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering")
             return []
 
-        # Hitung rata-rata
         avg_price = round(mean(filtered_prices))
         logger.info(f"✅ Harga rata-rata di Blibli: Rp{avg_price:,}")
 
         return [f"Rp{avg_price:,}".replace(",", ".")]
 
     except Exception as e:
-        logger.info(f"❌ Gagal scraping Blibli: {str(e)}")
+        logger.error(f"❌ Gagal scraping Blibli: {str(e)}")
         return []
     finally:
-        if driver is not None:  # Hanya panggil quit() jika driver berhasil dibuat
-            driver.quit()
-            
+        if driver is not None:
+            driver.quit()   
+                
 async def scrape_digimap_price(query):
     """Scraping harga dari Digimap menggunakan HTML parsing."""
     query = normalize_price_query(query)
