@@ -44,7 +44,9 @@ def get_headers(site):
         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Connection": "keep-alive"
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Accept-Encoding": "gzip, deflate, br",
     }
 
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
@@ -331,6 +333,7 @@ async def scrape_bukalapak_price(query):
     except Exception as e:
         logging.error(f"❌ Gagal scraping Bukalapak: {str(e)}")
         return []
+
 async def scrape_blibli_price(query):
     """Scraping harga dari Blibli menggunakan JSON API."""
     query = normalize_price_query(query)
