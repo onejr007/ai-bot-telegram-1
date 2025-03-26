@@ -3,8 +3,19 @@ import redis
 import re
 from statistics import mean, median
 import logging
+import os
 
-redis_client = redis.Redis(host='redis.railway.internal', port=6379, db=0, decode_responses=True)
+# Koneksi Redis dengan autentikasi
+REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+redis_client = redis.Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    password=REDIS_PASSWORD,
+    db=0,
+    decode_responses=True
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

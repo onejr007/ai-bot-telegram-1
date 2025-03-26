@@ -15,7 +15,17 @@ from selenium.webdriver.support import expected_conditions as EC
 import logging
 from utils import clean_price_format, get_min_reasonable_price, normalize_price_query, mean, save_price_history, find_price_in_history
 
-redis_client = redis.Redis(host='redis.railway.internal', port=6379, db=0, decode_responses=True)
+# Koneksi Redis dengan autentikasi
+REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+redis_client = redis.Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    password=REDIS_PASSWORD,
+    db=0,
+    decode_responses=True
+)
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -213,9 +223,13 @@ async def scrape_price(query):
         scrape_blibli_price(query),
         scrape_digimap_price(query),
     ]
-    results = await asyncio.gather(*tasks)
-    all_prices = [price for sublist in results for price in sublist]
-    unique_prices = sorted(set(all_prices))
-    if unique_prices:
-        save_price_history(query, f"{min(unique_prices)} - {max(unique_prices)}")
-    return unique_prices[:5] if unique_prices else None
+    try:
+        results = await asyncio.gather(*tasks)
+        all_prices = [price for sublist in results for price in sublist]
+        unique_prices = sorted(set(all_prices))
+        if unique_prices:
+            save_price_history(query, f"{min(unique_prices)} - {max(unique_prices)}")
+        return unique_prices[:5] if unique_prices else None
+    except Exception as e:
+        logger.error(f"❌ Gagal menjalankan scraping: {e}")
+        return None
