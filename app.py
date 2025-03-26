@@ -426,17 +426,19 @@ async def scrape_bukalapak_price(query):
         return []
 
 async def scrape_blibli_price(query):
-    """Scraping harga dari Blibli: tanpa proxy dulu, fallback ke proxy jika challenge terdeteksi"""
+    """Scraping harga dari Blibli: tanpa proxy dulu, fallback ke proxy jika challenge terdeteksi atau gagal"""
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
     
     # Coba tanpa proxy terlebih dahulu
     logger.info(f"Mencoba scraping Blibli tanpa proxy: {search_url}")
     result = await try_scrape_blibli(search_url, use_proxy=False)
-    if result is not None:  # Berhasil atau gagal tanpa challenge
-        return result
+    if result is not None:  # Berhasil (ada harga atau list kosong tanpa challenge)
+        if result:  # Hanya return jika ada harga
+            return result
+        # Jika gagal tanpa proxy (bukan challenge), lanjut ke proxy
     
-    # Jika challenge terdeteksi, coba dengan proxy
-    logger.info("⚠️ Challenge terdeteksi, beralih ke mode proxy...")
+    # Jika challenge terdeteksi atau gagal tanpa proxy, coba dengan proxy
+    logger.info("⚠️ Gagal atau challenge terdeteksi, beralih ke mode proxy...")
     proxies = get_free_proxies()  # Sudah dibatasi ke 5
     logger.info(f"Daftar proxy yang akan digunakan (maks 5): {proxies}")
     
@@ -444,7 +446,7 @@ async def scrape_blibli_price(query):
         logger.info(f"Mencoba proxy: {proxy}")
         result = await try_scrape_blibli(search_url, use_proxy=True, proxy=proxy)
         if result is not None:  # Berhasil atau gagal tanpa challenge
-            return result
+            return result if result else []  # Return harga jika ada, atau [] jika kosong
     
     logger.error("❌ Semua percobaan gagal atau tidak menemukan harga")
     return []
@@ -501,11 +503,12 @@ async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
     except Exception as e:
         error_message = getattr(e, 'msg', str(e).split('\n')[0])
         logger.error(f"❌ Gagal{' dengan proxy ' + proxy if use_proxy else ' tanpa proxy'}: {error_message}")
-        return [] if "challenge" not in error_message.lower() else None  # None untuk challenge, [] untuk kegagalan lain
+        # Hanya kembalikan None jika challenge terdeteksi, biarkan proxy dicoba untuk error lain
+        return None if "challenge" in error_message.lower() else []
     finally:
         if driver is not None:
-            driver.quit()
-            
+            driver.quit() 
+                  
 async def scrape_digimap_price(query):
     """Scraping harga dari Digimap menggunakan HTML parsing."""
     query = normalize_price_query(query)
