@@ -633,25 +633,52 @@ def normalize_price_query(text):
 
     return text.strip()
 
+async def animate_search_message(message, stop_event):
+    """Memperbarui pesan dengan animasi titik-titik hingga stop_event di-set."""
+    dots = ["🔍 Mencari harga.", "🔍 Mencari harga..", "🔍 Mencari harga..."]
+    idx = 0
+    while not stop_event.is_set():
+        await message.edit_text(dots[idx % 3])  # Siklus melalui 3 variasi
+        idx += 1
+        await asyncio.sleep(0.5)  # Update setiap 0.5 detik
+
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
 
     # Jika ini pertanyaan harga dalam chat (bukan inline query)
     if is_price_question(text):
-        await update.message.reply_text("🔍 Mencari harga...")
-        normalized_question = normalize_price_query(text)
-        prices = await scrape_price(normalized_question)
+        # Kirim pesan awal
+        message = await update.message.reply_text("🔍 Mencari harga.")
+        
+        # Buat event untuk menghentikan animasi
+        stop_event = asyncio.Event()
 
-        if prices:
-            min_price = min(prices)
-            max_price = max(prices)
-            answer = f"Kisaran Harga: {min_price} - {max_price}"
-        else:
-            answer = "❌ Tidak dapat menemukan harga untuk produk tersebut."
+        # Jalankan animasi di background
+        animation_task = asyncio.create_task(animate_search_message(message, stop_event))
 
-        await update.message.reply_text(answer)
+        try:
+            normalized_question = normalize_price_query(text)
+            prices = await scrape_price(normalized_question)
+
+            # Hentikan animasi setelah scraping selesai
+            stop_event.set()
+            await animation_task  # Tunggu animasi selesai dengan rapi
+
+            if prices:
+                min_price = min(prices)
+                max_price = max(prices)
+                answer = f"Kisaran Harga: {min_price} - {max_price}"
+            else:
+                answer = "❌ Tidak dapat menemukan harga untuk produk tersebut."
+
+            await message.edit_text(answer)  # Ganti pesan dengan hasil akhir
+        except Exception as e:
+            stop_event.set()
+            await animation_task
+            await message.edit_text(f"❌ Terjadi kesalahan: {str(e)}")
     else:
-        await handle_general_question(update, text)  # Panggil fungsi lain untuk pertanyaan umum
+        # Hentikan animasi (meskipun belum dimulai) dan lanjutkan ke handle_general_question
+        await handle_general_question(update, text)
 
 async def handle_general_question(update, text):
     """Menangani pertanyaan yang tidak berkaitan dengan harga"""
