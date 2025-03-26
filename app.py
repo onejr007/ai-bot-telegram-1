@@ -25,8 +25,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 ]
 
 def get_headers(site):
@@ -34,6 +33,7 @@ def get_headers(site):
     referers = {
         "tokopedia": "https://www.tokopedia.com/",
         "shopee": "https://shopee.co.id/",
+        "lazada": "https://www.lazada.co.id/",
     }
     
     return {
@@ -220,63 +220,41 @@ async def scrape_tokopedia_price(query):
         logging.error(f"❌ Gagal scraping Tokopedia untuk '{query}': {str(e)}")
         return []
 
-async def scrape_shopee_price(query):
-    """Scraping harga dari Shopee berdasarkan struktur HTML terbaru."""
-    search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
-
+async def scrape_lazada_price(query):
+    """Scraping harga dari Lazada."""
+    search_url = f"https://www.lazada.co.id/catalog/?q={query.replace(' ', '+')}"
     try:
-        response = requests.get(search_url, headers=get_headers("shopee"), timeout=10)
-        logging.info(f"Link Shopee : '{search_url}'")
+        response = requests.get(search_url, headers=get_headers("lazada"), timeout=10)
         if response.status_code != 200:
-            logging.error(f"❌ Gagal mengakses Shopee untuk '{query}' (status {response.status_code})")
+            logging.error(f"❌ Gagal mengakses Lazada (status {response.status_code})")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-
-        # Coba beberapa selektor alternatif
-        price_elements = (
-            soup.select("li.shopee-search-item-result__item span.font-medium.text-base\/5.truncate") or
-            soup.select("span[class*='price']") or  # Selektor generik untuk elemen dengan "price" di kelas
-            soup.select("div[class*='item-card'] span")  # Selektor untuk struktur item card
-        )
+        price_elements = soup.select("div[data-qa-locator='product-item'] span[class*='price']")
 
         if not price_elements:
-            logging.warning(f"⚠️ Tidak menemukan elemen harga untuk '{query}' dengan semua selektor")
-            # Cetak sampel HTML untuk debugging
+            logging.warning(f"⚠️ Tidak menemukan elemen harga untuk '{query}' di Lazada")
             logging.debug(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
-        raw_prices = [price.get_text(strip=True) for price in price_elements if price.get_text(strip=True)]
-        logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
+        raw_prices = [price.get_text(strip=True) for price in price_elements]
+        logging.info(f"🔍 Harga mentah di Lazada untuk '{query}': {raw_prices}")
 
-        # Bersihkan harga
-        valid_prices = [clean_price_format(f"Rp{price}") for price in raw_prices if clean_price_format(f"Rp{price}") is not None]
+        valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price) is not None]
         logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
-            logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Shopee")
             return []
 
-        # Tentukan batas harga terendah yang masuk akal
         min_reasonable_price = get_min_reasonable_price(valid_prices)
-        logging.info(f"📉 Harga terendah yang masuk akal: {min_reasonable_price}")
-
-        # Filter harga
         filtered_prices = [p for p in valid_prices if p >= min_reasonable_price]
-        logging.info(f"✅ Harga setelah filter: {filtered_prices}")
-
-        if not filtered_prices:
-            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
-            return []
-
-        # Hitung rata-rata
         avg_price = round(mean(filtered_prices))
-        logging.info(f"✅ Harga rata-rata di Shopee untuk '{query}': Rp{avg_price:,}")
+        logging.info(f"✅ Harga rata-rata di Lazada: Rp{avg_price:,}")
 
         return [f"Rp{avg_price:,}".replace(",", ".")]
 
     except Exception as e:
-        logging.error(f"❌ Gagal scraping Shopee untuk '{query}': {str(e)}")
+        logging.error(f"❌ Gagal scraping Lazada: {str(e)}")
         return []
     
 async def scrape_bukalapak_price(query):
@@ -380,9 +358,9 @@ async def scrape_price(query):
     tokopedia_prices = await scrape_tokopedia_price(query)
     logging.info(f"✅ Hasil Tokopedia: {tokopedia_prices}")
 
-    logging.info("🔄 Scraping harga dari Shopee...")
-    shopee_prices = await scrape_shopee_price(query)
-    logging.info(f"✅ Hasil Shopee: {shopee_prices}")
+    logging.info("🔄 Scraping harga dari Lazada...")
+    lazada_prices = await scrape_lazada_price(query)
+    logging.info(f"✅ Hasil Lazada: {lazada_prices}")
 
     logging.info("🔄 Scraping harga dari Bukalapak...")
     bukalapak_prices = await scrape_bukalapak_price(query)
@@ -396,7 +374,7 @@ async def scrape_price(query):
     digimap_prices = await scrape_digimap_price(query)
     logging.info(f"✅ Hasil Digimap: {digimap_prices}")
 
-    all_prices = tokopedia_prices + shopee_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
+    all_prices = tokopedia_prices + lazada_prices + bukalapak_prices + list(blibli_prices) + list(digimap_prices)
     unique_prices = sorted(set(all_prices))
 
     if not unique_prices:
