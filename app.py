@@ -49,7 +49,6 @@ HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
 # Konfigurasi logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
 
 CHAT_HISTORY_FILE = "chat_history.json"
 PRICE_HISTORY_FILE = "price_history.json"
@@ -75,13 +74,13 @@ def train_markov():
             text_data = f.read().strip()
         
         if not text_data or len(text_data.split()) < 5:
-            logging.warning("⚠️ Tidak cukup data untuk model Markov! Menggunakan dataset default.")
+            logging.info("⚠️ Tidak cukup data untuk model Markov! Menggunakan dataset default.")
             text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
 
         return markovify.Text(text_data, state_size=2)
     
     except FileNotFoundError:
-        logging.error("❌ File history_chat.txt tidak ditemukan. Menggunakan model default.")
+        logging.info("❌ File history_chat.txt tidak ditemukan. Menggunakan model default.")
         text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
         return markovify.Text(text_data, state_size=2)
 
@@ -92,13 +91,13 @@ def predict_markov(query):
         prediction = model.make_sentence(tries=10)  # Coba prediksi hingga 10 kali
         
         if not prediction:
-            logging.warning(f"⚠️ Tidak ada prediksi Markov untuk: {query}")
+            logging.info(f"⚠️ Tidak ada prediksi Markov untuk: {query}")
             return ""
         
         return prediction
     
     except Exception as e:
-        logging.error(f"❌ Gagal memprediksi dengan Markov: {e}")
+        logging.info(f"❌ Gagal memprediksi dengan Markov: {e}")
         return ""
 
 def add_to_history(text):
@@ -182,7 +181,7 @@ async def scrape_tokopedia_price(query):
     try:
         response = requests.get(search_url, headers=get_headers("tokopedia"), timeout=10)
         if response.status_code != 200:
-            logging.error(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
+            logging.info(f"❌ Gagal mengambil data harga dari Tokopedia untuk '{query}'")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -195,7 +194,7 @@ async def scrape_tokopedia_price(query):
         logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
-            logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
+            logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Tokopedia")
             return []
 
         # Tentukan batas harga terendah yang masuk akal
@@ -207,7 +206,7 @@ async def scrape_tokopedia_price(query):
         logging.info(f"✅ Harga setelah filter: {filtered_prices}")
 
         if not filtered_prices:
-            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
+            logging.info(f"❌ Tidak ada harga yang masuk akal setelah filtering untuk '{query}'")
             return []
 
         avg_price = round(mean(filtered_prices))
@@ -216,7 +215,7 @@ async def scrape_tokopedia_price(query):
         return [f"Rp{avg_price:,}".replace(",", ".")]
     
     except Exception as e:
-        logging.error(f"❌ Gagal scraping Tokopedia untuk '{query}': {str(e)}")
+        logging.info(f"❌ Gagal scraping Tokopedia untuk '{query}': {str(e)}")
         return []
 
 async def scrape_lazada_price(query):
@@ -228,7 +227,7 @@ async def scrape_lazada_price(query):
     try:
         response = requests.get(search_url, headers=get_headers("lazada"), timeout=10, allow_redirects=True)
         if response.status_code != 200:
-            logging.error(f"❌ Gagal mengakses Lazada (status {response.status_code})")
+            logging.info(f"❌ Gagal mengakses Lazada (status {response.status_code})")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -240,8 +239,8 @@ async def scrape_lazada_price(query):
         logging.info(f"🔍 Harga mentah ditemukan di Lazada untuk '{query}': {raw_prices}")
 
         if not raw_prices:
-            logging.warning(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
-            logging.debug(f"HTML sample: {soup.prettify()[:2000]}")
+            logging.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
+            logging.info(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
         # Bersihkan harga menggunakan fungsi yang sudah ada
@@ -249,7 +248,7 @@ async def scrape_lazada_price(query):
         logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
-            logging.warning(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
+            logging.info(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
             return []
 
         # Tentukan batas harga terendah yang masuk akal
@@ -261,7 +260,7 @@ async def scrape_lazada_price(query):
         logging.info(f"✅ Harga setelah filter: {filtered_prices}")
 
         if not filtered_prices:
-            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering")
+            logging.info(f"❌ Tidak ada harga yang masuk akal setelah filtering")
             return []
 
         # Hitung rata-rata
@@ -271,7 +270,7 @@ async def scrape_lazada_price(query):
         return [f"Rp{avg_price:,}".replace(",", ".")]
 
     except Exception as e:
-        logging.error(f"❌ Gagal scraping Lazada: {str(e)}")
+        logging.info(f"❌ Gagal scraping Lazada: {str(e)}")
         return []
     
 async def scrape_bukalapak_price(query):
@@ -282,7 +281,7 @@ async def scrape_bukalapak_price(query):
     logging.info(f"Link Bukalapak : '{search_url}'")
 
     if response.status_code != 200:
-        logging.error(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
+        logging.info(f"❌ Gagal mengambil data harga dari Bukalapak untuk '{query}'")
         return []
 
     try:
@@ -290,7 +289,7 @@ async def scrape_bukalapak_price(query):
         products = data.get("data", {}).get("products", [])
         raw_prices = [int(product["price"]) for product in products]
     except Exception as e:
-        logging.error(f"⚠️ Gagal memproses JSON Bukalapak: {e}")
+        logging.info(f"⚠️ Gagal memproses JSON Bukalapak: {e}")
         return []
 
     logging.info(f"🔍 Harga mentah ditemukan di Bukalapak untuk '{query}': {raw_prices}")
@@ -306,7 +305,7 @@ async def scrape_bukalapak_price(query):
         logging.info(f"✅ Harga termurah di Bukalapak untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}"]
 
-    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Bukalapak")
+    logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Bukalapak")
     return []
 
 async def scrape_blibli_price(query):
@@ -317,7 +316,7 @@ async def scrape_blibli_price(query):
     logging.info(f"Link Blibli : '{search_url}'")
 
     if response.status_code != 200:
-        logging.error(f"❌ Gagal mengambil data harga dari Blibli untuk '{query}'")
+        logging.info(f"❌ Gagal mengambil data harga dari Blibli untuk '{query}'")
         return []
 
     try:
@@ -325,7 +324,7 @@ async def scrape_blibli_price(query):
         products = data.get("data", {}).get("products", [])
         raw_prices = [int(product["price"]["value"]) for product in products]
     except Exception as e:
-        logging.error(f"⚠️ Gagal memproses JSON Blibli: {e}")
+        logging.info(f"⚠️ Gagal memproses JSON Blibli: {e}")
         return []
 
     logging.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
@@ -337,7 +336,7 @@ async def scrape_blibli_price(query):
         logging.info(f"✅ Harga termurah di Blibli untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}"]
 
-    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Blibli")
+    logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Blibli")
     return []
 
 async def scrape_digimap_price(query):
@@ -348,7 +347,7 @@ async def scrape_digimap_price(query):
     logging.info(f"Link Digimap : '{search_url}'")
 
     if response.status_code != 200:
-        logging.error(f"❌ Gagal mengambil data harga dari Digimap untuk '{query}'")
+        logging.info(f"❌ Gagal mengambil data harga dari Digimap untuk '{query}'")
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -364,7 +363,7 @@ async def scrape_digimap_price(query):
         logging.info(f"✅ Harga termurah di Digimap untuk '{query}': Rp{best_price:,}")
         return [f"Rp{best_price:,}"]
 
-    logging.warning(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Digimap")
+    logging.info(f"❌ Tidak menemukan harga yang masuk akal untuk '{query}' di Digimap")
     return []
 
 async def scrape_price(query):
@@ -395,7 +394,7 @@ async def scrape_price(query):
     unique_prices = sorted(set(all_prices))
 
     if not unique_prices:
-        logging.warning(f"❌ Tidak menemukan harga untuk '{query}'")
+        logging.info(f"❌ Tidak menemukan harga untuk '{query}'")
     else:
         logging.info(f"📊 Harga ditemukan untuk '{query}': {unique_prices}")
 
