@@ -9,6 +9,8 @@ import nest_asyncio
 import re
 import random
 
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
@@ -48,6 +50,11 @@ def get_headers(site):
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
     }
 
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
@@ -336,19 +343,32 @@ async def scrape_bukalapak_price(query):
         return []
 
 async def scrape_blibli_price(query):
-    """Scraping harga dari Blibli dengan mencari teks yang diawali 'Rp'."""
+    """Scraping harga dari Blibli menggunakan Selenium."""
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
-    logger.info(f"🔄 Scraping harga dari Blibli untuk '{query}'...")
-    logger.info(f"URL awal: {search_url}")
+    
+    # Konfigurasi Selenium untuk headless mode
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Tanpa UI
+    chrome_options.add_argument("--no-sandbox")  # Penting untuk container
+    chrome_options.add_argument("--disable-dev-shm-usage")  # Hindari masalah memori
+    chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
+    chrome_options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/chromium")  # Default untuk Railway
+
+    logger.info(f"🔄 Scraping harga dari Blibli untuk '{query}' dengan Selenium...")
+    logger.debug(f"URL awal: {search_url}")
 
     try:
-        response = requests.get(search_url, headers=get_headers("blibli"), timeout=10, allow_redirects=True)
-        if response.status_code != 200:
-            logger.info(f"❌ Gagal mengakses Blibli (status {response.status_code})")
-            return []
+        # Gunakan path ChromeDriver dari env atau default untuk Railway
+        driver = webdriver.Chrome(
+            executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"),
+            options=chrome_options
+        )
+        driver.get(search_url)
+        await asyncio.sleep(5)  # Tunggu 5 detik untuk memuat JavaScript
+        logger.info(f"URL setelah memuat: {driver.current_url}")
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        logger.info(f"URL setelah redirect (jika ada): {response.url}")
+        # Ambil HTML setelah rendering
+        soup = BeautifulSoup(driver.page_source, "html.parser")
 
         # Cari teks yang diawali "Rp" menggunakan regex
         all_text = soup.get_text()
@@ -356,8 +376,8 @@ async def scrape_blibli_price(query):
         logger.info(f"🔍 Harga mentah ditemukan di Blibli untuk '{query}': {raw_prices}")
 
         if not raw_prices:
-            logger.info(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
-            logger.info(f"HTML sample: {soup.prettify()[:2000]}")
+            logger.warning(f"⚠️ Tidak menemukan teks harga dengan 'Rp' untuk '{query}'")
+            logger.debug(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
         # Bersihkan harga
@@ -365,7 +385,7 @@ async def scrape_blibli_price(query):
         logger.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
         if not valid_prices:
-            logger.info(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
+            logger.warning(f"❌ Tidak ada harga valid setelah cleaning untuk '{query}'")
             return []
 
         # Tentukan batas harga terendah yang masuk akal
@@ -377,7 +397,7 @@ async def scrape_blibli_price(query):
         logger.info(f"✅ Harga setelah filter: {filtered_prices}")
 
         if not filtered_prices:
-            logging.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering")
+            logger.warning(f"❌ Tidak ada harga yang masuk akal setelah filtering")
             return []
 
         # Hitung rata-rata
@@ -387,9 +407,11 @@ async def scrape_blibli_price(query):
         return [f"Rp{avg_price:,}".replace(",", ".")]
 
     except Exception as e:
-        logger.info(f"❌ Gagal scraping Blibli: {str(e)}")
+        logger.error(f"❌ Gagal scraping Blibli: {str(e)}")
         return []
-    
+    finally:
+        driver.quit()
+
 async def scrape_digimap_price(query):
     """Scraping harga dari Digimap menggunakan HTML parsing."""
     query = normalize_price_query(query)
@@ -604,6 +626,11 @@ def is_price_question(text):
     return any(keyword in text for keyword in price_keywords)
 
 def main():
+    # Pastikan token ada
+    if not TOKEN:
+        logger.info("❌ TELEGRAM_BOT_TOKEN tidak ditemukan di environment variables!")
+        return
+
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
