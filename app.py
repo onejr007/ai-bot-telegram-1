@@ -217,13 +217,9 @@ async def scrape_tokopedia_price(query):
 async def scrape_shopee_price(query):
     """Scraping harga dari Shopee berdasarkan struktur HTML terbaru."""
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "id,en;q=0.9",
-        "Referer": "https://shopee.co.id/",
-        "Connection": "keep-alive",
-    }
+    response = requests.get(search_url, headers=get_headers("shopee"))
+
+    logging.info(f"Link Shopee : '{search_url}'")
 
     try:
         response = requests.get(search_url, headers=headers, timeout=10)
@@ -233,18 +229,23 @@ async def scrape_shopee_price(query):
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Selektor spesifik berdasarkan HTML yang diberikan
-        price_elements = soup.select("li.shopee-search-item-result__item span.font-medium.text-base\/5.truncate")
+        # Coba beberapa selektor alternatif
+        price_elements = (
+            soup.select("li.shopee-search-item-result__item span.font-medium.text-base\/5.truncate") or
+            soup.select("span[class*='price']") or  # Selektor generik untuk elemen dengan "price" di kelas
+            soup.select("div[class*='item-card'] span")  # Selektor untuk struktur item card
+        )
 
         if not price_elements:
-            logging.warning(f"⚠️ Tidak menemukan elemen harga untuk '{query}' dengan selektor spesifik")
-            logging.debug(f"HTML sample: {soup.prettify()[:1000]}")
+            logging.warning(f"⚠️ Tidak menemukan elemen harga untuk '{query}' dengan semua selektor")
+            # Cetak sampel HTML untuk debugging
+            logging.debug(f"HTML sample: {soup.prettify()[:2000]}")
             return []
 
         raw_prices = [price.get_text(strip=True) for price in price_elements if price.get_text(strip=True)]
         logging.info(f"🔍 Harga mentah ditemukan di Shopee untuk '{query}': {raw_prices}")
 
-        # Bersihkan harga menggunakan fungsi yang sudah ada
+        # Bersihkan harga
         valid_prices = [clean_price_format(f"Rp{price}") for price in raw_prices if clean_price_format(f"Rp{price}") is not None]
         logging.info(f"✅ Harga valid setelah cleaning: {valid_prices}")
 
@@ -273,6 +274,7 @@ async def scrape_shopee_price(query):
     except Exception as e:
         logging.error(f"❌ Gagal scraping Shopee untuk '{query}': {str(e)}")
         return []
+    
 async def scrape_bukalapak_price(query):
     """Scraping harga dari Bukalapak menggunakan JSON API."""
     query = normalize_price_query(query)
