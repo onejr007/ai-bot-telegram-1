@@ -67,27 +67,48 @@ def get_headers(site):
 HEADERS = {"User-Agent": random.choice(USER_AGENTS)}
 
 def fetch_proxies_from_free_proxy_list():
-    """Mengambil proxy dari free-proxy-list.net"""
+    """Fetch proxies from free-proxy-list.net"""
     url = "https://free-proxy-list.net/"
+    proxies = []
+
     try:
         response = requests.get(url, headers=get_headers("free-proxy"), timeout=10)
-        response.raise_for_status()
+        response.raise_for_status()  # Raise an error for bad status codes
         soup = BeautifulSoup(response.text, "html.parser")
-        proxies = []
-        for row in soup.select("#list tbody tr")[:10]:  # Ambil 10 proxy pertama
+
+        # Find the table with proxies
+        table = soup.find("table", class_="table table-striped table-bordered")
+        if not table:
+            logger.error("❌ Tidak menemukan tabel proxy di free-proxy-list.net")
+            return proxies
+
+        # Extract rows from tbody
+        rows = table.find("tbody").find_all("tr")
+        if not rows:
+            logger.error("❌ Tidak ada baris proxy ditemukan di tabel")
+            return proxies
+
+        # Loop through rows and extract IP and port
+        for row in rows:
             cols = row.find_all("td")
-            ip = cols[0].text
-            port = cols[1].text
-            proxies.append(f"{ip}:{port}")
-        logger.info(f"Berhasil mengambil {len(proxies)} proxy dari free-proxy-list.net")
+            if len(cols) >= 2:  # Ensure there are enough columns
+                ip = cols[0].text.strip()  # IP Address
+                port = cols[1].text.strip()  # Port
+                # Skip invalid IPs like "0.0.0.0" or "127.0.0.7"
+                if ip and port and ip != "0.0.0.0" and ip != "127.0.0.7":
+                    proxy = f"{ip}:{port}"
+                    proxies.append(proxy)
+
+        logger.info(f"✅ Berhasil mengambil {len(proxies)} proxy dari free-proxy-list.net")
         return proxies
-    except Exception as e:
-        logger.error(f"Gagal mengambil proxy dari free-proxy-list.net: {str(e)}")
-        return []
+
+    except requests.RequestException as e:
+        logger.error(f"❌ Gagal mengambil proxy dari free-proxy-list.net: {str(e)}")
+        return proxies
 
 def fetch_proxies_from_proxyscrape():
     """Mengambil proxy dari proxyscrape.com"""
-    url = "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&country=all"
+    url = "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&country=id"
     try:
         response = requests.get(url, headers=get_headers("proxyscrape"), timeout=10)
         response.raise_for_status()
