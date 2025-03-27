@@ -3,6 +3,8 @@ import os
 import logging
 import uuid
 import signal
+import json
+import random
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram.error import BadRequest
@@ -18,13 +20,43 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+]
+
+def get_headers(site):
+    referers = {
+        "tokopedia": "https://www.tokopedia.com/",
+        "lazada": "https://www.lazada.co.id/",
+        "blibli": "https://www.blibli.com/",
+        "samsung": "https://www.samsung.com/id/",
+        "shopee": "https://shopee.co.id/",
+        "google": "https://www.google.com/",
+        "bing": "https://www.bing.com/"
+    }
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Referer": referers.get(site, "https://www.google.com/"),
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Connection": "keep-alive",
+    }
+
 async def fetch_google_suggestions(query):
     url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={query}&hl=id"
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                data = await response.json()
-                return data[1][:4] if len(data) > 1 else []
+            async with session.get(url, headers=get_headers("google"), timeout=aiohttp.ClientTimeout(total=5)) as response:
+                # Ambil teks mentah karena MIME type bukan application/json
+                text = await response.text()
+                # Parse JSON secara manual
+                data = json.loads(text)
+                suggestions = data[1][:6] if len(data) > 1 else []
+                logger.info(f"ℹ️ Saran dari Google: {suggestions}")
+                return suggestions
         except Exception as e:
             logger.error(f"❌ Gagal mengambil saran dari Google: {e}")
             return []
@@ -33,9 +65,14 @@ async def fetch_bing_suggestions(query):
     url = f"https://api.bing.com/qsonhs.aspx?type=cb&q={query}"
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                data = await response.json()
-                return [item["q"] for item in data["AS"]["Results"][0]["Suggests"]][:4] if "AS" in data else []
+            async with session.get(url, headers=get_headers("bing"), timeout=aiohttp.ClientTimeout(total=5)) as response:
+                # Ambil teks mentah karena MIME type bukan application/json
+                text = await response.text()
+                # Parse JSON secara manual
+                data = json.loads(text)
+                suggestions = [item["q"] for item in data["AS"]["Results"][0]["Suggests"]][:6] if "AS" in data else []
+                logger.info(f"ℹ️ Saran dari Bing: {suggestions}")
+                return suggestions
         except Exception as e:
             logger.error(f"❌ Gagal mengambil saran dari Bing: {e}")
             return []
@@ -46,44 +83,51 @@ async def predict_markov(query):
         chat_history = load_chat_history()
         query_words = query.split()
 
-        # Prioritaskan Redis
+        # 1. Prioritaskan Redis
         if chat_history:
             logger.info(f"ℹ️ Mengambil prediksi dari Redis untuk '{query}'")
             for entry in chat_history:
                 if entry.startswith(query) and entry != query and len(predictions) < 4:
                     predictions.add(entry)
-        
-        # Jika kurang dari 4, ambil dari Google dan Bing
+
+        # 2. Lengkapi dari Google dan Bing jika kurang dari 4
         if len(predictions) < 4:
             logger.info(f"ℹ️ Prediksi dari Redis kurang dari 4, melengkapi dari search engine.")
             google_preds = await fetch_google_suggestions(query)
             bing_preds = await fetch_bing_suggestions(query)
             all_preds = google_preds + bing_preds
+            
+            # Filter dan tambahkan prediksi yang relevan
             for pred in all_preds:
-                if pred.startswith(query) and pred != query and pred not in predictions and len(predictions) < 4:
+                if (pred.startswith(query) and 
+                    pred != query and 
+                    pred not in predictions and 
+                    len(pred.split()) > len(query_words) and
+                    len(predictions) < 4):
                     predictions.add(pred)
-                    save_chat_history(pred)  # Simpan ke Redis
-        
-        # Jika masih kurang dari 4, tambahkan default
+                    save_chat_history(pred)
+
+        # 3. Fallback akhir hanya 2 opsi: second dan baru
         if len(predictions) < 4:
-            default_preds = [
-                f"{query} 15",
-                f"{query} 14",
-                f"{query} 13",
-                f"{query} 12"
+            logger.info(f"ℹ️ Prediksi masih kurang, menambahkan fallback akhir (second/baru).")
+            fallback_preds = [
+                f"{query} second",
+                f"{query} baru"
             ]
-            for default in default_preds:
-                if default != query and default not in predictions and len(predictions) < 4:
-                    predictions.add(default)
-        
+            for pred in fallback_preds:
+                if pred != query and pred not in predictions and len(predictions) < 4:
+                    predictions.add(pred)
+                    save_chat_history(pred)
+
         return list(predictions)[:4]
     except Exception as e:
         logger.error(f"❌ Gagal memprediksi: {e}")
-        return [f"{query} barang"]
+        return [f"{query} second", f"{query} baru"]
 
 def add_to_history(text):
     if len(text.split()) > 1:
         save_chat_history(text)
+        logger.info(f"📌 Menambahkan '{text}' ke chat history di Redis")
 
 async def start(update: Update, context: CallbackContext):
     await update.message.reply_text("Gunakan inline mode '@NamaBot <kata>' untuk prediksi teks atau kirim pertanyaan harga di chat.")
