@@ -11,6 +11,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException
 import logging
 from utils import normalize_price_query, save_price_history, find_price_in_history
 
@@ -68,14 +69,10 @@ def get_chrome_options(headless=True, proxy=None):
     return options
 
 def clean_and_validate_prices(raw_prices):
-    """Membersihkan dan memvalidasi harga dari teks"""
     cleaned_prices = []
     for price in raw_prices:
-        # Hapus "Rp" dan karakter non-numerik kecuali titik/koma
         price_cleaned = re.sub(r"[^\d.,]", "", price.replace("Rp", "").strip())
-        # Ganti koma dengan titik untuk konsistensi
         price_cleaned = price_cleaned.replace(",", ".")
-        # Ambil hanya angka dengan format yang valid
         match = re.search(r"(\d+(?:\.\d+)*)", price_cleaned)
         if match:
             num = match.group().replace(".", "")
@@ -84,12 +81,10 @@ def clean_and_validate_prices(raw_prices):
             except ValueError:
                 continue
     
-    # Filter harga yang masuk akal (misalnya, minimal 1000, maksimal 1 miliar)
     valid_prices = [p for p in cleaned_prices if 1000 <= p <= 1_000_000_000]
     if not valid_prices:
         return {"max": "0", "min": "0", "avg": "0"}
     
-    # Hitung statistik
     sorted_prices = sorted(valid_prices)
     min_price = sorted_prices[0]
     max_price = sorted_prices[-1]
@@ -107,7 +102,6 @@ async def scrape_tokopedia_price(query):
         response = requests.get(search_url, headers=get_headers("tokopedia"), timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        # Cari teks yang mengandung "Rp" atau angka dengan 4+ digit
         raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
         return clean_and_validate_prices(raw_prices)
     except Exception as e:
@@ -133,12 +127,15 @@ async def scrape_shopee_price(query):
     try:
         service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.set_page_load_timeout(15)
+        driver.set_page_load_timeout(20)
         driver.get(search_url)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         soup = BeautifulSoup(driver.page_source, "html.parser")
         raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
         return clean_and_validate_prices(raw_prices)
+    except (TimeoutException, WebDriverException) as e:
+        logger.error(f"❌ Gagal scraping Shopee (timeout atau driver error): {e}")
+        return {"max": "0", "min": "0", "avg": "0"}
     except Exception as e:
         logger.error(f"❌ Gagal scraping Shopee: {e}")
         return {"max": "0", "min": "0", "avg": "0"}
@@ -146,24 +143,32 @@ async def scrape_shopee_price(query):
         if driver:
             driver.quit()
 
-async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
+async def try_scrape_blibli(search_url, use_proxy=False, proxy=None, retries=2):
     chrome_options = get_chrome_options(headless=True, proxy=proxy if use_proxy else None)
     driver = None
-    try:
-        service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.set_page_load_timeout(15)
-        driver.get(search_url)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
-        return clean_and_validate_prices(raw_prices)
-    except Exception as e:
-        logger.error(f"❌ Gagal scraping Blibli{' dengan proxy ' + proxy if use_proxy else ''}: {e}")
-        return {"max": "0", "min": "0", "avg": "0"}
-    finally:
-        if driver:
-            driver.quit()
+    attempt = 0
+    while attempt < retries:
+        try:
+            service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.set_page_load_timeout(20)
+            driver.get(search_url)
+            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+            return clean_and_validate_prices(raw_prices)
+        except (TimeoutException, WebDriverException) as e:
+            attempt += 1
+            logger.error(f"❌ Gagal scraping Blibli (percobaan {attempt}/{retries}): {e}")
+            if attempt < retries:
+                await asyncio.sleep(2)  # Tunggu sebelum retry
+        except Exception as e:
+            logger.error(f"❌ Gagal scraping Blibli{' dengan proxy ' + proxy if use_proxy else ''}: {e}")
+            break
+        finally:
+            if driver:
+                driver.quit()
+    return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_blibli_price(query):
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"

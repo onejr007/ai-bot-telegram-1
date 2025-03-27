@@ -1,9 +1,11 @@
 from multiprocessing import Process
 import proxy_scraper
+
 import asyncio
 import os
 import logging
 import uuid
+
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram.error import BadRequest
@@ -69,25 +71,31 @@ async def animate_search_message(message):
     while True:
         try:
             await message.edit_text(dots[idx % 4])
+            logger.debug(f"🔄 Animasi iterasi {idx}: {dots[idx % 4]}")
             idx += 1
             await asyncio.sleep(0.5)
         except BadRequest as e:
             if "Message is not modified" not in str(e):
                 logger.error(f"❌ Error saat mengedit pesan: {e}")
+                break
+        except asyncio.CancelledError:
+            logger.info("🛑 Animasi dibatalkan")
+            break
         except Exception as e:
-            logger.error(f"❌ Error tak terduga: {e}")
+            logger.error(f"❌ Error tak terduga di animasi: {e}")
             break
 
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
     if is_price_question(text):
         message = await update.message.reply_text("🔍 Mencari harga")
-        animation_task = asyncio.create_task(animate_search_message(message))
+        animation_task = asyncio.ensure_future(animate_search_message(message))
         try:
             normalized_query = normalize_price_query(text)
             add_to_history(f"harga {normalized_query}")
             prices = await scrape_price(normalized_query)
             animation_task.cancel()
+            await asyncio.sleep(0.1)  # Beri waktu untuk pembatalan
             if prices and prices["avg"] != "0":
                 answer = f"Kisaran Harga:\nMin: Rp{prices['min']}\nMax: Rp{prices['max']}\nRata-rata: Rp{prices['avg']}"
             else:
@@ -95,6 +103,7 @@ async def handle_message(update: Update, context: CallbackContext):
             await message.edit_text(answer)
         except Exception as e:
             animation_task.cancel()
+            await asyncio.sleep(0.1)
             await message.edit_text(f"❌ Terjadi kesalahan: {e}")
     else:
         await update.message.reply_text("Ini bukan pertanyaan harga. Fitur lain segera ditambahkan!")
