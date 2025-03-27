@@ -2,6 +2,7 @@ import asyncio
 import os
 import logging
 import uuid
+import signal
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram.error import BadRequest
@@ -109,15 +110,22 @@ def is_price_question(text):
     price_keywords = ["harga", "berapa harga", "cari harga", "harga terbaru", "diskon", "best price", "murah", "mahal"]
     return any(keyword in text for keyword in price_keywords)
 
-async def run_proxy_scraper():
+async def run_proxy_scraper_periodically():
     while True:
         try:
             logger.info("🚀 Memulai scraping proxy...")
-            await asyncio.to_thread(scrape_and_store_proxies)  # Jalankan di thread terpisah
-            await asyncio.sleep(5 * 60)  # 5 menit
+            task = asyncio.create_task(scrape_and_store_proxies())
+            await task  # Tunggu hingga scraping selesai
+            logger.info("✅ Proxy scraping selesai untuk iterasi ini")
         except Exception as e:
             logger.error(f"❌ Gagal menjalankan proxy scraper: {e}")
-            await asyncio.sleep(60)
+        await asyncio.sleep(5 * 60)  # Tunggu 5 menit sebelum iterasi berikutnya
+
+async def shutdown(application):
+    logger.info("🛑 Memulai proses shutdown bot...")
+    await application.stop()
+    await application.shutdown()
+    logger.info("✅ Shutdown bot selesai.")
 
 async def main():
     if not TOKEN:
@@ -129,9 +137,21 @@ async def main():
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-    asyncio.create_task(run_proxy_scraper())
+    # Jalankan proxy scraper sebagai tugas latar belakang
+    asyncio.create_task(run_proxy_scraper_periodically())
+
+    # Tangani sinyal shutdown untuk bot saja
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(app)))
+
     logger.info("🚀 Bot Telegram sedang berjalan...")
-    await app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    # Jaga agar main tetap berjalan sampai shutdown dipicu
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())

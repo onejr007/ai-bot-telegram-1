@@ -1,9 +1,9 @@
-import requests
+import aiohttp
 from bs4 import BeautifulSoup
 import redis
 import random
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
 import os
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
@@ -43,158 +43,158 @@ def get_headers(site):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def test_proxy(proxy, timeout=3):
+async def test_proxy(proxy, timeout=3):
     test_url = "http://httpbin.org/ip"
-    proxies = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
-    try:
-        response = requests.get(test_url, proxies=proxies, headers=get_headers("httpbin"), timeout=timeout)
-        return response.status_code == 200
-    except Exception as e:
-        logger.debug(f"Proxy {proxy} gagal: {e}")
-        return False
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(test_url, proxy=f"http://{proxy}", headers=get_headers("httpbin"), timeout=aiohttp.ClientTimeout(total=timeout)) as response:
+                return response.status == 200
+        except Exception as e:
+            logger.debug(f"Proxy {proxy} gagal: {e}")
+            return False
 
-def fetch_openproxyspace_proxies():
+async def fetch_openproxyspace_proxies():
     url = "https://openproxy.space/list/http"
-    try:
-        response = requests.get(url, headers=get_headers("openproxy"), timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        proxies = [item.text.strip() for item in soup.select(".list .item") if ":" in item.text.strip()]
-        return proxies
-    except Exception as e:
-        logger.error(f"❌ Gagal mengambil proxy dari OpenProxySpace: {e}")
-        return []
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=get_headers("openproxy"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                text = await response.text()
+                soup = BeautifulSoup(text, "html.parser")
+                proxies = [item.text.strip() for item in soup.select(".list .item") if ":" in item.text.strip()]
+                return proxies
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil proxy dari OpenProxySpace: {e}")
+            return []
 
-def fetch_proxy_list_download():
+async def fetch_proxy_list_download():
     url = "https://www.proxy-list.download/api/v1/get?type=http&country=ID"
-    try:
-        response = requests.get(url, headers=get_headers("proxy-list"), timeout=10)
-        response.raise_for_status()
-        return [p for p in response.text.splitlines() if p.strip()]
-    except Exception as e:
-        logger.error(f"❌ Gagal mengambil proxy dari Proxy-List.download: {e}")
-        return []
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=get_headers("proxy-list"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                text = await response.text()
+                return [p for p in text.splitlines() if p.strip()]
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil proxy dari Proxy-List.download: {e}")
+            return []
 
-def fetch_geonode_proxies():
+async def fetch_geonode_proxies():
     url = "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&country=ID"
-    try:
-        response = requests.get(url, headers=get_headers("proxylist"), timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("data"):
-            logger.warning("⚠️ Tidak ada data proxy dari Geonode")
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=get_headers("proxylist"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if not data.get("data"):
+                    logger.warning("⚠️ Tidak ada data proxy dari Geonode")
+                    return []
+                return [f"{item['ip']}:{item['port']}" for item in data["data"] if item.get("country") == "ID"]
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil proxy dari Geonode: {e}")
             return []
-        return [f"{item['ip']}:{item['port']}" for item in data["data"] if item.get("country") == "ID"]
-    except Exception as e:
-        logger.error(f"❌ Gagal mengambil proxy dari Geonode: {e}")
-        return []
 
-def fetch_free_proxy_list():
+async def fetch_free_proxy_list():
     url = "https://free-proxy-list.net/"
-    try:
-        response = requests.get(url, headers=get_headers("free-proxy-list"), timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        table = soup.find("table")
-        if not table:
-            logger.warning("⚠️ Tidak ada tabel proxy di Free Proxy List")
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=get_headers("free-proxy-list"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                text = await response.text()
+                soup = BeautifulSoup(text, "html.parser")
+                table = soup.find("table")
+                if not table:
+                    logger.warning("⚠️ Tidak ada tabel proxy di Free Proxy List")
+                    return []
+                proxies = []
+                for row in table.find("tbody").find_all("tr"):
+                    cols = row.find_all("td")
+                    if len(cols) > 3 and cols[3].text.strip() == "Indonesia":
+                        proxies.append(f"{cols[0].text.strip()}:{cols[1].text.strip()}")
+                return proxies
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil proxy dari Free Proxy List: {e}")
             return []
-        proxies = []
-        for row in table.find("tbody").find_all("tr"):
-            cols = row.find_all("td")
-            if len(cols) > 3 and cols[3].text.strip() == "Indonesia":
-                proxies.append(f"{cols[0].text.strip()}:{cols[1].text.strip()}")
-        return proxies
-    except Exception as e:
-        logger.error(f"❌ Gagal mengambil proxy dari Free Proxy List: {e}")
-        return []
 
-def fetch_proxyscrape_proxies():
+async def fetch_proxyscrape_proxies():
     url = "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&country=id"
-    try:
-        response = requests.get(url, headers=get_headers("proxyscrape"), timeout=10)
-        response.raise_for_status()
-        return [p for p in response.text.splitlines() if p.strip()]
-    except Exception as e:
-        logger.error(f"❌ Gagal mengambil proxy dari Proxyscrape: {e}")
-        return []
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=get_headers("proxyscrape"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                text = await response.text()
+                return [p for p in text.splitlines() if p.strip()]
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil proxy dari Proxyscrape: {e}")
+            return []
 
-def fetch_proxynova_proxies():
+async def fetch_proxynova_proxies():
     url = "https://www.proxynova.com/proxy-server-list/country-id/"
-    try:
-        response = requests.get(url, headers=get_headers("proxynova"), timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        proxies = []
-        table = soup.find("table", {"id": "tbl_proxy_list"})
-        if not table:
-            logger.warning("⚠️ Tidak ada tabel proxy di ProxyNova")
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=get_headers("proxynova"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                text = await response.text()
+                soup = BeautifulSoup(text, "html.parser")
+                proxies = []
+                table = soup.find("table", {"id": "tbl_proxy_list"})
+                if not table:
+                    logger.warning("⚠️ Tidak ada tabel proxy di ProxyNova")
+                    return []
+                for row in table.find("tbody").find_all("tr"):
+                    cols = row.find_all("td")
+                    if len(cols) >= 2:
+                        ip = cols[0].text.strip()
+                        port = cols[1].text.strip()
+                        if ip and port:
+                            proxies.append(f"{ip}:{port}")
+                return proxies
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil proxy dari ProxyNova: {e}")
             return []
-        for row in table.find("tbody").find_all("tr"):
-            cols = row.find_all("td")
-            if len(cols) >= 2:
-                ip = cols[0].text.strip()
-                port = cols[1].text.strip()
-                if ip and port:
-                    proxies.append(f"{ip}:{port}")
-        return proxies
-    except Exception as e:
-        logger.error(f"❌ Gagal mengambil proxy dari ProxyNova: {e}")
-        return []
 
-def fetch_sslproxies_proxies():
+async def fetch_sslproxies_proxies():
     url = "https://www.sslproxies.org/"
-    try:
-        response = requests.get(url, headers=get_headers("sslproxies"), timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        proxies = []
-        table = soup.find("table", {"class": "table"})
-        if not table:
-            logger.warning("⚠️ Tidak ada tabel proxy di SSL Proxies")
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=get_headers("sslproxies"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                text = await response.text()
+                soup = BeautifulSoup(text, "html.parser")
+                proxies = []
+                table = soup.find("table", {"class": "table"})
+                if not table:
+                    logger.warning("⚠️ Tidak ada tabel proxy di SSL Proxies")
+                    return []
+                for row in table.find("tbody").find_all("tr"):
+                    cols = row.find_all("td")
+                    if len(cols) > 3 and cols[3].text.strip() == "ID":
+                        proxies.append(f"{cols[0].text.strip()}:{cols[1].text.strip()}")
+                return proxies
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil proxy dari SSL Proxies: {e}")
             return []
-        for row in table.find("tbody").find_all("tr"):
-            cols = row.find_all("td")
-            if len(cols) > 3 and cols[3].text.strip() == "ID":
-                proxies.append(f"{cols[0].text.strip()}:{cols[1].text.strip()}")
-        return proxies
-    except Exception as e:
-        logger.error(f"❌ Gagal mengambil proxy dari SSL Proxies: {e}")
-        return []
 
-def scrape_and_store_proxies():
+async def scrape_and_store_proxies():
     logger.info("🔄 Scraping dan memvalidasi proxy...")
     
-    geonode_proxies = fetch_geonode_proxies()
-    logger.info(f"📊 Jumlah proxy dari Geonode: {len(geonode_proxies)}")
+    tasks = [
+        fetch_geonode_proxies(),
+        fetch_free_proxy_list(),
+        fetch_proxyscrape_proxies(),
+        fetch_openproxyspace_proxies(),
+        fetch_proxy_list_download(),
+        fetch_proxynova_proxies(),
+        fetch_sslproxies_proxies()
+    ]
+    results = await asyncio.gather(*tasks)
     
-    free_proxy_list_proxies = fetch_free_proxy_list()
-    logger.info(f"📊 Jumlah proxy dari Free Proxy List: {len(free_proxy_list_proxies)}")
-    
-    proxyscrape_proxies = fetch_proxyscrape_proxies()
-    logger.info(f"📊 Jumlah proxy dari Proxyscrape: {len(proxyscrape_proxies)}")
-    
-    openproxy_proxies = fetch_openproxyspace_proxies()
-    logger.info(f"📊 Jumlah proxy dari OpenProxy: {len(openproxy_proxies)}")
-    
-    proxy_list_download_proxies = fetch_proxy_list_download()
-    logger.info(f"📊 Jumlah proxy dari Proxy-List.download: {len(proxy_list_download_proxies)}")
-    
-    proxynova_proxies = fetch_proxynova_proxies()
-    logger.info(f"📊 Jumlah proxy dari ProxyNova: {len(proxynova_proxies)}")
-
-    sslproxies_proxies = fetch_sslproxies_proxies()
-    logger.info(f"📊 Jumlah proxy dari SSLProxies: {len(sslproxies_proxies)}")
-    
-    all_proxies = list(set(
-        geonode_proxies + free_proxy_list_proxies + proxyscrape_proxies +
-        openproxy_proxies + proxy_list_download_proxies + proxynova_proxies +
-        sslproxies_proxies
-    ))
+    all_proxies = list(set(sum(results, [])))
     logger.info(f"Total proxy sebelum validasi: {len(all_proxies)}")
 
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        valid_proxies = [proxy for proxy, is_valid in zip(all_proxies, executor.map(test_proxy, all_proxies)) if is_valid]
+    test_tasks = [test_proxy(proxy) for proxy in all_proxies]
+    valid_results = await asyncio.gather(*test_tasks)
+    valid_proxies = [proxy for proxy, is_valid in zip(all_proxies, valid_results) if is_valid]
     
     try:
         if not check_redis_connection():
