@@ -1,4 +1,3 @@
-# app.py
 from multiprocessing import Process
 import proxy_scraper
 import asyncio
@@ -15,10 +14,10 @@ from utils import load_chat_history, save_chat_history, normalize_price_query, l
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
-logging.getLogger("httpx").setLevel(logging.WARNING)  # Nonaktifkan log httpx
-logging.getLogger("telegram").setLevel(logging.WARNING)  # Nonaktifkan log telegram
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Tetap izinkan log INFO dari kode Anda
+logger.setLevel(logging.INFO)
 
 def train_markov():
     try:
@@ -44,7 +43,7 @@ def add_to_history(text):
     save_chat_history(text)
 
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Gunakan inline mode dengan '@NamaBot <kata>' untuk prediksi teks atau kirim pertanyaan harga dalam chat.")
+    await update.message.reply_text("Gunakan inline mode '@NamaBot <kata>' untuk prediksi teks atau kirim pertanyaan harga di chat.")
 
 async def inline_query(update: Update, context: CallbackContext):
     query = update.inline_query.query.strip()
@@ -64,43 +63,38 @@ async def inline_query(update: Update, context: CallbackContext):
     if results:
         await update.inline_query.answer(results, cache_time=1)
 
-async def animate_search_message(message, stop_event):
-    dots = ["🔍 Mencari harga.", "🔍 Mencari harga..", "🔍 Mencari harga..."]
-    current_text = None
+async def animate_search_message(message):
+    dots = ["🔍 Mencari harga", "🔍 Mencari harga.", "🔍 Mencari harga..", "🔍 Mencari harga..."]
     idx = 0
-    while not stop_event.is_set():
-        new_text = dots[idx % 3]
-        if new_text != current_text:
-            try:
-                await message.edit_text(new_text)
-                current_text = new_text
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    logger.error(f"❌ Error saat mengedit pesan: {e}")
-            except Exception as e:
-                logger.error(f"❌ Error tak terduga: {e}")
-        idx += 1
-        await asyncio.sleep(0.5)
+    while True:
+        try:
+            await message.edit_text(dots[idx % 4])
+            idx += 1
+            await asyncio.sleep(0.5)
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                logger.error(f"❌ Error saat mengedit pesan: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error tak terduga: {e}")
+            break
 
 async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
     if is_price_question(text):
-        message = await update.message.reply_text("🔍 Mencari harga.")
-        stop_event = asyncio.Event()
-        animation_task = asyncio.create_task(animate_search_message(message, stop_event))
+        message = await update.message.reply_text("🔍 Mencari harga")
+        animation_task = asyncio.create_task(animate_search_message(message))
         try:
             normalized_query = normalize_price_query(text)
+            add_to_history(f"harga {normalized_query}")
             prices = await scrape_price(normalized_query)
-            stop_event.set()
-            await animation_task
-            if prices:
-                answer = f"Kisaran Harga: {min(prices)} - {max(prices)}"
+            animation_task.cancel()
+            if prices and prices["avg"] != "0":
+                answer = f"Kisaran Harga:\nMin: Rp{prices['min']}\nMax: Rp{prices['max']}\nRata-rata: Rp{prices['avg']}"
             else:
                 answer = "❌ Tidak dapat menemukan harga untuk produk tersebut."
             await message.edit_text(answer)
         except Exception as e:
-            stop_event.set()
-            await animation_task
+            animation_task.cancel()
             await message.edit_text(f"❌ Terjadi kesalahan: {e}")
     else:
         await update.message.reply_text("Ini bukan pertanyaan harga. Fitur lain segera ditambahkan!")

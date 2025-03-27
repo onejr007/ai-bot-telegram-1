@@ -1,4 +1,3 @@
-# price_scraper.py
 import requests
 from bs4 import BeautifulSoup
 import redis
@@ -13,19 +12,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import logging
-from utils import clean_price_format, get_min_reasonable_price, normalize_price_query, mean, save_price_history, find_price_in_history
+from utils import normalize_price_query, save_price_history, find_price_in_history
 
-# Koneksi Redis dengan autentikasi
 REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
-redis_client = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    password=REDIS_PASSWORD,
-    db=0,
-    decode_responses=True
-)
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, db=0, decode_responses=True)
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -35,32 +27,20 @@ USER_AGENTS = [
 ]
 
 def get_headers(site):
-    """Menghasilkan headers dinamis berdasarkan situs"""
     referers = {
         "tokopedia": "https://www.tokopedia.com/",
         "shopee": "https://shopee.co.id/",
         "lazada": "https://www.lazada.co.id/",
-        "priceza": "https://www.priceza.co.id/",
         "bukalapak": "https://www.bukalapak.com/",
         "blibli": "https://www.blibli.com/",
-        "free-proxy": "https://free-proxy-list.net/",
-        "proxyscrape": "https://api.proxyscrape.com/",
+        "digimap": "https://www.digimap.co.id/",
     }
-    
     return {
         "User-Agent": random.choice(USER_AGENTS),
-        "Referer": referers.get(site, "https://google.com/"),  # Default ke Google jika tidak dikenal
+        "Referer": referers.get(site, "https://www.google.com/"),
         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        "X-Requested-With": "XMLHttpRequest",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Accept-Encoding": "gzip, deflate, br",
-        "DNT": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1",
     }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -79,8 +59,7 @@ def get_chrome_options(headless=True, proxy=None):
         options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    user_agent = random.choice(USER_AGENTS)
-    options.add_argument(f"user-agent={user_agent}")
+    options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/chromium")
@@ -88,106 +67,108 @@ def get_chrome_options(headless=True, proxy=None):
         options.add_argument(f"--proxy-server={proxy}")
     return options
 
+def clean_and_validate_prices(raw_prices):
+    """Membersihkan dan memvalidasi harga dari teks"""
+    cleaned_prices = []
+    for price in raw_prices:
+        # Hapus "Rp" dan karakter non-numerik kecuali titik/koma
+        price_cleaned = re.sub(r"[^\d.,]", "", price.replace("Rp", "").strip())
+        # Ganti koma dengan titik untuk konsistensi
+        price_cleaned = price_cleaned.replace(",", ".")
+        # Ambil hanya angka dengan format yang valid
+        match = re.search(r"(\d+(?:\.\d+)*)", price_cleaned)
+        if match:
+            num = match.group().replace(".", "")
+            try:
+                cleaned_prices.append(int(num))
+            except ValueError:
+                continue
+    
+    # Filter harga yang masuk akal (misalnya, minimal 1000, maksimal 1 miliar)
+    valid_prices = [p for p in cleaned_prices if 1000 <= p <= 1_000_000_000]
+    if not valid_prices:
+        return {"max": "0", "min": "0", "avg": "0"}
+    
+    # Hitung statistik
+    sorted_prices = sorted(valid_prices)
+    min_price = sorted_prices[0]
+    max_price = sorted_prices[-1]
+    avg_price = round(sum(sorted_prices) / len(sorted_prices))
+    
+    return {
+        "max": f"{max_price:,}".replace(",", "."),
+        "min": f"{min_price:,}".replace(",", "."),
+        "avg": f"{avg_price:,}".replace(",", ".")
+    }
+
 async def scrape_tokopedia_price(query):
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
     try:
         response = requests.get(search_url, headers=get_headers("tokopedia"), timeout=10)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        raw_prices = soup.get_text().re.findall(r"Rp[\s]?[\d.,]+")
-        valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price)]
-        if not valid_prices:
-            return []
-        min_reasonable = get_min_reasonable_price(valid_prices)
-        filtered_prices = [p for p in valid_prices if p >= min_reasonable]
-        if not filtered_prices:
-            return []
-        avg_price = round(mean(filtered_prices))
-        return [f"Rp{avg_price:,}".replace(",", ".")]
+        # Cari teks yang mengandung "Rp" atau angka dengan 4+ digit
+        raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+        return clean_and_validate_prices(raw_prices)
     except Exception as e:
         logger.error(f"❌ Gagal scraping Tokopedia: {e}")
-        return []
-
-async def scrape_priceza_price(query):
-    search_url = f"https://www.priceza.co.id/s/priceza-search/?search={query.replace(' ', '+')}"
-    try:
-        response = requests.get(search_url, headers=get_headers("priceza"), timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        raw_prices = soup.get_text().re.findall(r"Rp[\s]?[\d,.]+")
-        valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price)]
-        if not valid_prices:
-            return []
-        min_reasonable = get_min_reasonable_price(valid_prices)
-        filtered_prices = [p for p in valid_prices if p >= min_reasonable]
-        if not filtered_prices:
-            return []
-        avg_price = round(mean(filtered_prices))
-        return [f"Rp{avg_price:,}".replace(",", ".")]
-    except Exception as e:
-        logger.error(f"❌ Gagal scraping Priceza: {e}")
-        return []
+        return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_bukalapak_price(query):
     search_url = f"https://www.bukalapak.com/products?search[keywords]={query.replace(' ', '%20')}"
     try:
         response = requests.get(search_url, headers=get_headers("bukalapak"), timeout=10)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        raw_prices = soup.get_text().re.findall(r"Rp[\s]?[\d,.]+")
-        valid_prices = [clean_price_format(price) for price in raw_prices if clean_price_format(price)]
-        if not valid_prices:
-            return []
-        min_reasonable = get_min_reasonable_price(valid_prices)
-        filtered_prices = [p for p in valid_prices if p >= min_reasonable]
-        if not filtered_prices:
-            return []
-        avg_price = round(mean(filtered_prices))
-        return [f"Rp{avg_price:,}".replace(",", ".")]
+        raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+        return clean_and_validate_prices(raw_prices)
     except Exception as e:
         logger.error(f"❌ Gagal scraping Bukalapak: {e}")
-        return []
+        return {"max": "0", "min": "0", "avg": "0"}
 
-async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
-    chrome_options = get_chrome_options(headless=True, proxy=proxy if use_proxy else None)
-    chrome_options.add_argument("--page-load-strategy=eager")
+async def scrape_shopee_price(query):
+    search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
+    chrome_options = get_chrome_options(headless=True)
     driver = None
     try:
         service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        driver.set_page_load_timeout(8)
+        driver.set_page_load_timeout(15)
         driver.get(search_url)
-        WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CLASS_NAME, "blu-product-card__price-final")))
-        if "challenge" in driver.current_url:
-            if use_proxy:
-                logger.info(f"🗑️ Proxy {proxy} terdeteksi diblokir (challenge), tidak digunakan lagi")
-            return None
-        price_elements = driver.find_elements(By.CLASS_NAME, "blu-product-card__price-final")
-        raw_prices = [elem.text.strip() for elem in price_elements if elem.text.strip()]
-        valid_prices = [clean_price_format(f"Rp{price}") for price in raw_prices if clean_price_format(f"Rp{price}")]
-        if not valid_prices:
-            return []
-        min_reasonable = get_min_reasonable_price(valid_prices)
-        filtered_prices = [p for p in valid_prices if p >= min_reasonable]
-        if not filtered_prices:
-            return []
-        avg_price = round(mean(filtered_prices))
-        return [f"Rp{avg_price:,}".replace(",", ".")]
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+        return clean_and_validate_prices(raw_prices)
     except Exception as e:
-        logger.error(f"❌ Gagal scraping Blibli{' dengan proxy ' + proxy if use_proxy else ''}: {e}")
-        if use_proxy and ("timeout" in str(e).lower() or "connection" in str(e).lower()):
-            logger.info(f"🗑️ Proxy {proxy} gagal (timeout/koneksi), tidak dimasukkan kembali")
-        return None if "challenge" in str(e).lower() else []
+        logger.error(f"❌ Gagal scraping Shopee: {e}")
+        return {"max": "0", "min": "0", "avg": "0"}
     finally:
         if driver:
-            try:
-                driver.quit()
-            except Exception as e:
-                logger.warning(f"⚠️ Gagal menutup driver: {e}")
-                           
+            driver.quit()
+
+async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
+    chrome_options = get_chrome_options(headless=True, proxy=proxy if use_proxy else None)
+    driver = None
+    try:
+        service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.set_page_load_timeout(15)
+        driver.get(search_url)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+        return clean_and_validate_prices(raw_prices)
+    except Exception as e:
+        logger.error(f"❌ Gagal scraping Blibli{' dengan proxy ' + proxy if use_proxy else ''}: {e}")
+        return {"max": "0", "min": "0", "avg": "0"}
+    finally:
+        if driver:
+            driver.quit()
+
 async def scrape_blibli_price(query):
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
-    logger.info(f"🔄 Scraping Blibli untuk '{query}'...")
     result = await try_scrape_blibli(search_url, use_proxy=False)
-    if result:
+    if result["avg"] != "0":
         return result
     logger.info("⚠️ Gagal tanpa proxy, mencoba dengan proxy...")
     while True:
@@ -196,47 +177,56 @@ async def scrape_blibli_price(query):
             logger.error("❌ Tidak ada proxy valid di Redis")
             break
         result = await try_scrape_blibli(search_url, use_proxy=True, proxy=proxy)
-        if result:
+        if result["avg"] != "0":
             return result
         logger.info(f"Proxy {proxy} gagal, mencoba proxy berikutnya...")
-    return []
+    return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_digimap_price(query):
-    query = normalize_price_query(query)
     search_url = f"https://www.digimap.co.id/search?type=product&q={query.replace(' ', '+')}"
     try:
-        response = requests.get(search_url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=10)
+        response = requests.get(search_url, headers=get_headers("digimap"), timeout=10)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        raw_prices = [price.get_text() for price in soup.select("span.money")]
-        valid_prices = [int(re.sub(r"[^\d]", "", price)) for price in raw_prices if 500000 <= int(re.sub(r"[^\d]", "", price)) <= 50000000]
-        if valid_prices:
-            best_price = min(valid_prices)
-            return [f"Rp{best_price:,}"]
-        return []
+        raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+        return clean_and_validate_prices(raw_prices)
     except Exception as e:
         logger.error(f"❌ Gagal scraping Digimap: {e}")
-        return []
+        return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_price(query):
     logger.info(f"🔍 Mencari harga untuk: {query}")
     cached_answer = find_price_in_history(query)
     if cached_answer:
-        return cached_answer.split(" - ") if " - " in cached_answer else [cached_answer]
+        min_max = cached_answer.split(" - ")
+        avg = str(round((int(min_max[0].replace("Rp", "").replace(".", "")) + int(min_max[1].replace("Rp", "").replace(".", ""))) / 2))
+        return {"max": min_max[1].replace("Rp", ""), "min": min_max[0].replace("Rp", ""), "avg": f"{avg:,}".replace(",", ".")}
 
     tasks = [
         scrape_tokopedia_price(query),
-        scrape_priceza_price(query),
         scrape_bukalapak_price(query),
+        scrape_shopee_price(query),
         scrape_blibli_price(query),
         scrape_digimap_price(query),
     ]
-    try:
-        results = await asyncio.gather(*tasks)
-        all_prices = [price for sublist in results for price in sublist]
-        unique_prices = sorted(set(all_prices))
-        if unique_prices:
-            save_price_history(query, f"{min(unique_prices)} - {max(unique_prices)}")
-        return unique_prices[:5] if unique_prices else None
-    except Exception as e:
-        logger.error(f"❌ Gagal menjalankan scraping: {e}")
+    results = await asyncio.gather(*tasks)
+    all_prices = []
+    for result in results:
+        if result["avg"] != "0":
+            all_prices.extend([int(result["min"].replace(".", "")), int(result["max"].replace(".", "")), int(result["avg"].replace(".", ""))])
+    
+    if not all_prices:
         return None
+    
+    sorted_prices = sorted(all_prices)
+    min_price = sorted_prices[0]
+    max_price = sorted_prices[-1]
+    avg_price = round(sum(sorted_prices) / len(sorted_prices))
+    
+    result = {
+        "max": f"{max_price:,}".replace(",", "."),
+        "min": f"{min_price:,}".replace(",", "."),
+        "avg": f"{avg_price:,}".replace(",", ".")
+    }
+    save_price_history(query, f"Rp{result['min']} - Rp{result['max']}")
+    return result
