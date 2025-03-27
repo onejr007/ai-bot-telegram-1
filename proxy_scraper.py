@@ -1,4 +1,3 @@
-# proxy_scraper.py
 import requests
 from bs4 import BeautifulSoup
 import redis
@@ -72,7 +71,6 @@ def fetch_hidemynam_proxies():
             if len(cols) >= 2:
                 ip, port = cols[0].text.strip(), cols[1].text.strip()
                 proxies.append(f"{ip}:{port}")
-        logger.debug(f"HideMyName proxies: {len(proxies)} ditemukan")
         return proxies
     except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari HideMyName: {e}")
@@ -84,14 +82,13 @@ def fetch_proxy_list_download():
         response = requests.get(url, headers=get_headers("proxy-list"), timeout=10)
         response.raise_for_status()
         proxies = response.text.splitlines()
-        logger.debug(f"Proxy-List.download proxies: {len(proxies)} ditemukan")
         return [p for p in proxies if p.strip()]
     except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari Proxy-List.download: {e}")
         return []
 
 def fetch_geonode_proxies():
-    url = "https://proxylist.geonode.com/api/proxy-list?limit=1000&page=1&sort_by=lastChecked&sort_type=desc&country=ID"  # Tingkatkan limit ke 1000
+    url = "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&country=ID"
     try:
         response = requests.get(url, headers=get_headers("proxylist"), timeout=10)
         response.raise_for_status()
@@ -100,12 +97,11 @@ def fetch_geonode_proxies():
             logger.warning("⚠️ Tidak ada data proxy dari Geonode")
             return []
         proxies = [f"{item['ip']}:{item['port']}" for item in data["data"] if item.get("country") == "ID"]
-        logger.debug(f"Geonode proxies: {len(proxies)} ditemukan")
         return proxies
     except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari Geonode: {e}")
         return []
-       
+
 def fetch_free_proxy_list():
     url = "https://free-proxy-list.net/"
     try:
@@ -121,7 +117,6 @@ def fetch_free_proxy_list():
             cols = row.find_all("td")
             if len(cols) > 3 and cols[3].text.strip() == "Indonesia":
                 proxies.append(f"{cols[0].text.strip()}:{cols[1].text.strip()}")
-        logger.debug(f"Free Proxy List proxies: {len(proxies)} ditemukan")
         return proxies
     except requests.RequestException as e:
         logger.error(f"❌ Gagal mengambil proxy dari Free Proxy List: {e}")
@@ -136,29 +131,46 @@ def fetch_proxyscrape_proxies():
         response = requests.get(url, headers=get_headers("proxyscrape"), timeout=10)
         response.raise_for_status()
         proxies = response.text.splitlines()
-        logger.debug(f"Proxyscrape proxies: {len(proxies)} ditemukan")
-        return [p for p in proxies if p.strip()]  # Hilangkan baris kosong
+        return [p for p in proxies if p.strip()]
     except requests.RequestException as e:
         logger.error(f"❌ Gagal mengambil proxy dari Proxyscrape: {e}")
         return []
 
 def scrape_and_store_proxies():
     logger.info("🔄 Scraping dan memvalidasi proxy...")
+    
+    # Ambil proxy dari setiap sumber dan catat jumlahnya
+    geonode_proxies = fetch_geonode_proxies()
+    logger.info(f"📊 Jumlah proxy dari Geonode: {len(geonode_proxies)}")
+    
+    free_proxy_list_proxies = fetch_free_proxy_list()
+    logger.info(f"📊 Jumlah proxy dari Free Proxy List: {len(free_proxy_list_proxies)}")
+    
+    proxyscrape_proxies = fetch_proxyscrape_proxies()
+    logger.info(f"📊 Jumlah proxy dari Proxyscrape: {len(proxyscrape_proxies)}")
+    
+    hidemynam_proxies = fetch_hidemynam_proxies()
+    logger.info(f"📊 Jumlah proxy dari HideMyName: {len(hidemynam_proxies)}")
+    
+    proxy_list_download_proxies = fetch_proxy_list_download()
+    logger.info(f"📊 Jumlah proxy dari Proxy-List.download: {len(proxy_list_download_proxies)}")
+    
+    # Gabungkan semua proxy dan hapus duplikat
     all_proxies = list(set(
-        fetch_geonode_proxies() + 
-        fetch_free_proxy_list() + 
-        fetch_proxyscrape_proxies() + 
-        fetch_hidemynam_proxies() + 
-        fetch_proxy_list_download()
+        geonode_proxies + 
+        free_proxy_list_proxies + 
+        proxyscrape_proxies + 
+        hidemynam_proxies + 
+        proxy_list_download_proxies
     ))
     logger.info(f"Total proxy sebelum validasi: {len(all_proxies)}")
 
-    with ThreadPoolExecutor(max_workers=20) as executor:  # Tingkatkan ke 20
+    with ThreadPoolExecutor(max_workers=20) as executor:
         valid_proxies = [proxy for proxy, is_valid in zip(all_proxies, executor.map(test_proxy, all_proxies)) if is_valid]
     
     try:
         if not check_redis_connection():
-            logger.warning(f"⚠️ Tidak bisa menyimpan Proxy karena Redis tidak tersedia")
+            logger.warning("⚠️ Tidak bisa menyimpan proxy karena Redis tidak tersedia")
             return
         
         redis_client.delete("proxy_list")
@@ -169,7 +181,7 @@ def scrape_and_store_proxies():
             logger.warning("⚠️ Tidak ada proxy valid ditemukan")
     except redis.RedisError as e:
         logger.error(f"❌ Gagal menyimpan proxy ke Redis: {e}")
-        
+
 def check_redis_connection():
     try:
         redis_client.ping()
@@ -177,8 +189,7 @@ def check_redis_connection():
     except redis.RedisError as e:
         logger.error(f"❌ Gagal terhubung ke Redis: {e}")
         return False
-    
-# proxy_scraper.py (lanjutan)
+
 def main():
     logger.info("🚀 Proxy Scraper Started...")
     scrape_and_store_proxies()  # Jalankan sekali saat start
