@@ -25,7 +25,7 @@ async def fetch_google_suggestions(query):
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 data = await response.json()
-                return data[1] if len(data) > 1 else []
+                return data[1][:4] if len(data) > 1 else []  # Maksimal 4 saran
         except Exception as e:
             logger.error(f"❌ Gagal mengambil saran dari Google: {e}")
             return []
@@ -35,24 +35,27 @@ def train_markov(query):
     if not chat_history:
         logger.info("ℹ️ Chat history kosong, menggunakan fallback Google.")
         suggestions = asyncio.run(fetch_google_suggestions(query))
-        text_data = " ".join(suggestions) if suggestions else "Selamat datang di bot prediksi teks."
+        text_data = "\n".join(suggestions) if suggestions else "Cek harga barang secara online."
     else:
-        text_data = " ".join(chat_history)
-    if len(text_data.split()) < 5:
-        text_data += " Selamat datang di bot prediksi teks."
-    return markovify.Text(text_data, state_size=2)
+        text_data = "\n".join(chat_history)
+    return markovify.Text(text_data, state_size=1)  # State_size 1 untuk prediksi kalimat
 
 def predict_markov(query):
     try:
         model = train_markov(query)
-        prediction = model.make_sentence(tries=10)
-        return prediction or ""
+        predictions = []
+        for _ in range(4):  # Maksimal 4 prediksi
+            sentence = model.make_short_sentence(140, tries=10)
+            if sentence and sentence not in predictions:
+                predictions.append(f"{query} {sentence.split()[-1]}")
+        return predictions
     except Exception as e:
         logger.error(f"❌ Gagal memprediksi Markov: {e}")
-        return ""
+        return [f"{query} barang"]
 
 def add_to_history(text):
-    save_chat_history(text)
+    if len(text.split()) > 1:  # Simpan hanya kalimat lengkap
+        save_chat_history(text)
 
 async def start(update: Update, context: CallbackContext):
     await update.message.reply_text("Gunakan inline mode '@NamaBot <kata>' untuk prediksi teks atau kirim pertanyaan harga di chat.")
@@ -62,9 +65,7 @@ async def inline_query(update: Update, context: CallbackContext):
     if not query:
         return
     add_to_history(query)
-    markov_result = predict_markov(query)
-    predictions = [f"{query} {markov_result.split()[1]}" if len(markov_result.split()) > 1 else ""]
-    predictions = list(set(predictions))[:3]
+    predictions = predict_markov(query)
     results = [
         InlineQueryResultArticle(
             id=str(uuid.uuid4()),
@@ -86,7 +87,7 @@ async def animate_search_message(message, stop_event):
                 await message.reply_text("Mohon tunggu, Bot masih berjalan")
             await message.edit_text(dots[idx % 4])
             idx += 1
-            await asyncio.sleep(1)  # Interval lebih lambat agar terlihat
+            await asyncio.sleep(1)
         except BadRequest as e:
             logger.debug(f"ℹ️ Pesan tidak dimodifikasi atau sudah dihapus: {e}")
             break

@@ -51,13 +51,13 @@ def get_valid_proxy():
 def clean_and_validate_prices(raw_prices, site):
     cleaned_prices = []
     for price in raw_prices:
-        # Ambil hanya bagian numerik pertama yang signifikan
-        match = re.search(r"Rp\s*(\d+(?:[.,]\d{3})*)", price)
+        price_text = price.get_text(strip=True) if hasattr(price, "get_text") else str(price)
+        match = re.search(r"Rp\s*(\d+(?:[.,]\d{3})*)", price_text)
         if match:
             price_cleaned = re.sub(r"[^\d]", "", match.group(1))
             try:
                 num = int(price_cleaned)
-                if 1000 <= num <= 100_000_000:  # Batas Rp100 juta
+                if 1000 <= num <= 100_000_000:
                     cleaned_prices.append(num)
             except ValueError:
                 continue
@@ -67,10 +67,9 @@ def clean_and_validate_prices(raw_prices, site):
         logger.info(f"{site}: Tidak ada harga valid ditemukan")
         return {"max": "0", "min": "0", "avg": "0"}
     
-    # Tentukan harga rasional berdasarkan modus
     price_counts = Counter(cleaned_prices)
     most_common_price = price_counts.most_common(1)[0][0]
-    rational_range = (most_common_price * 0.7, most_common_price * 1.3)  # Rentang 70%-130% dari modus
+    rational_range = (most_common_price * 0.7, most_common_price * 1.3)
     
     valid_prices = [p for p in cleaned_prices if rational_range[0] <= p <= rational_range[1]]
     logger.info(f"{site}: Harga rasional (rentang {rational_range[0]:,}-{rational_range[1]:,}): {valid_prices}")
@@ -104,7 +103,7 @@ async def scrape_tokopedia_price(query):
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = soup.select(".price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Tokopedia: Harga mentah ditemukan: {raw_prices}")
+                logger.info(f"Tokopedia: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
                 return clean_and_validate_prices(raw_prices, "Tokopedia")
         except Exception as e:
             logger.error(f"Tokopedia: Gagal scraping: {e}")
@@ -128,7 +127,7 @@ async def scrape_bukalapak_price(query):
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = soup.select(".bl-product-card__price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Bukalapak: Harga mentah ditemukan: {raw_prices}")
+                logger.info(f"Bukalapak: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
                 return clean_and_validate_prices(raw_prices, "Bukalapak")
         except Exception as e:
             logger.error(f"Bukalapak: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
@@ -152,7 +151,7 @@ async def scrape_shopee_price(query):
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = soup.select(".shopee-search-item-result__item .price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Shopee: Harga mentah ditemukan: {raw_prices}")
+                logger.info(f"Shopee: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
                 return clean_and_validate_prices(raw_prices, "Shopee")
         except Exception as e:
             logger.error(f"Shopee: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
@@ -176,7 +175,7 @@ async def scrape_blibli_price(query):
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = soup.select(".product__price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Blibli: Harga mentah ditemukan: {raw_prices}")
+                logger.info(f"Blibli: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
                 return clean_and_validate_prices(raw_prices, "Blibli")
         except Exception as e:
             logger.error(f"Blibli: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
@@ -194,7 +193,7 @@ async def scrape_digimap_price(query):
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = soup.select(".price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Digimap: Harga mentah ditemukan: {raw_prices}")
+                logger.info(f"Digimap: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
                 return clean_and_validate_prices(raw_prices, "Digimap")
         except Exception as e:
             logger.error(f"Digimap: Gagal scraping: {e}")
@@ -223,15 +222,29 @@ async def scrape_price(query):
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
-    valid_results = [r for r in results if not isinstance(r, Exception) and r["avg"] != "0"]
-    if not valid_results:
+    all_prices = []
+    for i, result in enumerate(results):
+        if not isinstance(result, Exception) and result["avg"] != "0":
+            site = ["Tokopedia", "Bukalapak", "Shopee", "Blibli", "Digimap"][i]
+            prices = [int(result["min"].replace(".", "")), int(result["max"].replace(".", "")), int(result["avg"].replace(".", ""))]
+            all_prices.extend(prices)
+    
+    if not all_prices:
         logger.info(f"❌ Tidak ada hasil valid untuk {query} dari semua situs")
         return None
     
-    avg_values = [int(r["avg"].replace(".", "")) for r in valid_results]
-    min_avg = min(avg_values)
-    max_avg = max(avg_values)
-    avg_avg = round(sum(avg_values) / len(avg_values))
+    price_counts = Counter(all_prices)
+    most_common_price = price_counts.most_common(1)[0][0]
+    rational_range = (most_common_price * 0.7, most_common_price * 1.3)
+    valid_prices = [p for p in all_prices if rational_range[0] <= p <= rational_range[1]]
+    
+    if not valid_prices:
+        logger.info(f"❌ Tidak ada harga rasional untuk {query} dari semua situs")
+        return None
+    
+    min_avg = min(valid_prices)
+    max_avg = max(valid_prices)
+    avg_avg = round(sum(valid_prices) / len(valid_prices))
     
     result = {
         "max": "{:,.0f}".format(max_avg).replace(",", "."),
