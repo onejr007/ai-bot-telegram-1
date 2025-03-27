@@ -30,37 +30,39 @@ async def fetch_google_suggestions(query):
             logger.error(f"❌ Gagal mengambil saran dari Google: {e}")
             return []
 
-def train_markov(query):
+async def train_markov(query):
     chat_history = load_chat_history()
     if not chat_history:
         logger.info("ℹ️ Chat history kosong, menggunakan fallback Google.")
-        suggestions = asyncio.run(fetch_google_suggestions(query))
+        suggestions = await fetch_google_suggestions(query)
         text_data = "\n".join(suggestions) if suggestions else "Cek harga barang secara online."
     else:
         text_data = "\n".join(chat_history)
     return markovify.Text(text_data, state_size=1)
 
-def predict_markov(query):
+async def predict_markov(query):
     try:
-        model = train_markov(query)
+        model = await train_markov(query)
         predictions = set()
         # Prediksi dari Markov
-        for _ in range(10):  # Coba lebih banyak untuk variasi
+        for _ in range(20):  # Coba lebih banyak untuk variasi
             sentence = model.make_short_sentence(140, tries=10)
-            if sentence and f"{query} {sentence}" not in predictions:
-                predictions.add(f"{query} {sentence}")
-                if len(predictions) == 4:
-                    break
+            if sentence:
+                pred = f"{query} {sentence.split()[-1]}"  # Ambil kata terakhir untuk variasi
+                if pred not in predictions:
+                    predictions.add(pred)
+                    if len(predictions) == 4:
+                        break
         
         # Jika kurang dari 4, tambahkan dari Google
         if len(predictions) < 4:
-            google_preds = asyncio.run(fetch_google_suggestions(query))
+            google_preds = await fetch_google_suggestions(query)
             for pred in google_preds:
                 if pred not in predictions and len(predictions) < 4:
                     predictions.add(pred)
                     save_chat_history(pred)  # Simpan ke Redis
         
-        return list(predictions)[:4]
+        return list(predictions)[:4] if predictions else [f"{query} barang"]
     except Exception as e:
         logger.error(f"❌ Gagal memprediksi Markov: {e}")
         return [f"{query} barang"]
@@ -77,7 +79,7 @@ async def inline_query(update: Update, context: CallbackContext):
     if not query:
         return
     add_to_history(query)
-    predictions = predict_markov(query)
+    predictions = await predict_markov(query)
     results = [
         InlineQueryResultArticle(
             id=str(uuid.uuid4()),
