@@ -151,17 +151,20 @@ async def try_scrape_blibli(search_url, use_proxy=False, proxy=None, retries=2):
         try:
             service = Service(executable_path=os.getenv("CHROMEDRIVER_BIN", "/usr/bin/chromedriver"))
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.set_page_load_timeout(20)
+            driver.set_page_load_timeout(25)
             driver.get(search_url)
-            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             soup = BeautifulSoup(driver.page_source, "html.parser")
             raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
             return clean_and_validate_prices(raw_prices)
         except (TimeoutException, WebDriverException) as e:
             attempt += 1
             logger.error(f"❌ Gagal scraping Blibli (percobaan {attempt}/{retries}): {e}")
+            if use_proxy and attempt >= retries:
+                redis_client.lrem("proxy_list", 0, proxy)  # Hapus proxy yang gagal
+                logger.info(f"🗑️ Proxy {proxy} dihapus dari Redis karena gagal")
             if attempt < retries:
-                await asyncio.sleep(2)  # Tunggu sebelum retry
+                await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"❌ Gagal scraping Blibli{' dengan proxy ' + proxy if use_proxy else ''}: {e}")
             break

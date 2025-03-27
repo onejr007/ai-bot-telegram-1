@@ -1,17 +1,14 @@
-from multiprocessing import Process
-import proxy_scraper
-
 import asyncio
 import os
 import logging
 import uuid
-
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram.error import BadRequest
 import markovify
 from price_scraper import scrape_price
 from utils import load_chat_history, save_chat_history, normalize_price_query, logger
+from proxy_scraper import scrape_and_store_proxies
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -89,7 +86,7 @@ async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
     if is_price_question(text):
         message = await update.message.reply_text("🔍 Mencari harga")
-        animation_task = asyncio.ensure_future(animate_search_message(message))
+        animation_task = asyncio.create_task(animate_search_message(message))
         try:
             normalized_query = normalize_price_query(text)
             add_to_history(f"harga {normalized_query}")
@@ -112,7 +109,17 @@ def is_price_question(text):
     price_keywords = ["harga", "berapa harga", "cari harga", "harga terbaru", "diskon", "best price", "murah", "mahal"]
     return any(keyword in text for keyword in price_keywords)
 
-def main():
+async def run_proxy_scraper():
+    while True:
+        try:
+            logger.info("🚀 Memulai scraping proxy...")
+            await asyncio.to_thread(scrape_and_store_proxies)  # Jalankan di thread terpisah
+            await asyncio.sleep(5 * 60)  # 5 menit
+        except Exception as e:
+            logger.error(f"❌ Gagal menjalankan proxy scraper: {e}")
+            await asyncio.sleep(60)
+
+async def main():
     if not TOKEN:
         logger.error("❌ TELEGRAM_BOT_TOKEN tidak ditemukan!")
         return
@@ -122,17 +129,9 @@ def main():
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-    proxy_process = Process(target=proxy_scraper.main)
-    try:
-        proxy_process.start()
-        logger.info("🚀 Bot Telegram dan Proxy Scraper sedang berjalan...")
-        app.run_polling()
-    except Exception as e:
-        logger.error(f"❌ Gagal menjalankan bot atau proxy scraper: {e}")
-    finally:
-        if proxy_process.is_alive():
-            proxy_process.terminate()
-            logger.info("🛑 Proxy Scraper dihentikan.")
+    asyncio.create_task(run_proxy_scraper())
+    logger.info("🚀 Bot Telegram sedang berjalan...")
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

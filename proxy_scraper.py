@@ -1,24 +1,15 @@
 import requests
 from bs4 import BeautifulSoup
 import redis
-import schedule
-import time
 import random
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import os
 
-# Koneksi Redis dengan autentikasi (gunakan variabel lingkungan)
 REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")  # Tambahkan password dari Railway
-redis_client = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    password=REDIS_PASSWORD,
-    db=0,
-    decode_responses=True
-)
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, db=0, decode_responses=True)
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -68,20 +59,7 @@ def fetch_openproxyspace_proxies():
         response = requests.get(url, headers=get_headers("openproxy"), timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        proxies = []
-        
-        # Cari elemen yang berisi daftar proxy
-        proxy_items = soup.select(".list .item")
-        for item in proxy_items:
-            proxy_text = item.text.strip()
-            # Asumsikan format "IP:Port" dan filter hanya proxy Indonesia
-            if ":" in proxy_text:
-                # Open Proxy Space tidak selalu menyediakan kode negara secara eksplisit di HTML,
-                # jadi kita ambil semua proxy HTTP dan validasi nanti jika perlu
-                proxies.append(proxy_text)
-        
-        # Catatan: Jika ingin filter khusus ID, perlu API atau sumber lain dengan metadata negara
-        logger.debug(f"OpenProxySpace proxies: {len(proxies)} ditemukan")
+        proxies = [item.text.strip() for item in soup.select(".list .item") if ":" in item.text.strip()]
         return proxies
     except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari OpenProxySpace: {e}")
@@ -92,8 +70,7 @@ def fetch_proxy_list_download():
     try:
         response = requests.get(url, headers=get_headers("proxy-list"), timeout=10)
         response.raise_for_status()
-        proxies = response.text.splitlines()
-        return [p for p in proxies if p.strip()]
+        return [p for p in response.text.splitlines() if p.strip()]
     except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari Proxy-List.download: {e}")
         return []
@@ -107,8 +84,7 @@ def fetch_geonode_proxies():
         if not data.get("data"):
             logger.warning("⚠️ Tidak ada data proxy dari Geonode")
             return []
-        proxies = [f"{item['ip']}:{item['port']}" for item in data["data"] if item.get("country") == "ID"]
-        return proxies
+        return [f"{item['ip']}:{item['port']}" for item in data["data"] if item.get("country") == "ID"]
     except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari Geonode: {e}")
         return []
@@ -129,11 +105,8 @@ def fetch_free_proxy_list():
             if len(cols) > 3 and cols[3].text.strip() == "Indonesia":
                 proxies.append(f"{cols[0].text.strip()}:{cols[1].text.strip()}")
         return proxies
-    except requests.RequestException as e:
+    except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari Free Proxy List: {e}")
-        return []
-    except AttributeError as e:
-        logger.error(f"❌ Gagal parsing HTML dari Free Proxy List: {e}")
         return []
 
 def fetch_proxyscrape_proxies():
@@ -141,9 +114,8 @@ def fetch_proxyscrape_proxies():
     try:
         response = requests.get(url, headers=get_headers("proxyscrape"), timeout=10)
         response.raise_for_status()
-        proxies = response.text.splitlines()
-        return [p for p in proxies if p.strip()]
-    except requests.RequestException as e:
+        return [p for p in response.text.splitlines() if p.strip()]
+    except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari Proxyscrape: {e}")
         return []
 
@@ -183,19 +155,16 @@ def fetch_sslproxies_proxies():
             return []
         for row in table.find("tbody").find_all("tr"):
             cols = row.find_all("td")
-            if len(cols) > 3 and cols[3].text.strip() == "ID":  # Filter Indonesia
-                ip = cols[0].text.strip()
-                port = cols[1].text.strip()
-                proxies.append(f"{ip}:{port}")
+            if len(cols) > 3 and cols[3].text.strip() == "ID":
+                proxies.append(f"{cols[0].text.strip()}:{cols[1].text.strip()}")
         return proxies
     except Exception as e:
         logger.error(f"❌ Gagal mengambil proxy dari SSL Proxies: {e}")
         return []
-        
+
 def scrape_and_store_proxies():
     logger.info("🔄 Scraping dan memvalidasi proxy...")
     
-    # Ambil proxy dari setiap sumber dan catat jumlahnya
     geonode_proxies = fetch_geonode_proxies()
     logger.info(f"📊 Jumlah proxy dari Geonode: {len(geonode_proxies)}")
     
@@ -217,15 +186,9 @@ def scrape_and_store_proxies():
     sslproxies_proxies = fetch_sslproxies_proxies()
     logger.info(f"📊 Jumlah proxy dari SSLProxies: {len(sslproxies_proxies)}")
     
-    
-    # Gabungkan semua proxy dan hapus duplikat
     all_proxies = list(set(
-        geonode_proxies + 
-        free_proxy_list_proxies + 
-        proxyscrape_proxies + 
-        openproxy_proxies + 
-        proxy_list_download_proxies +
-        proxynova_proxies +
+        geonode_proxies + free_proxy_list_proxies + proxyscrape_proxies +
+        openproxy_proxies + proxy_list_download_proxies + proxynova_proxies +
         sslproxies_proxies
     ))
     logger.info(f"Total proxy sebelum validasi: {len(all_proxies)}")
@@ -238,12 +201,13 @@ def scrape_and_store_proxies():
             logger.warning("⚠️ Tidak bisa menyimpan proxy karena Redis tidak tersedia")
             return
         
-        redis_client.delete("proxy_list")
-        if valid_proxies:
-            redis_client.rpush("proxy_list", *valid_proxies)
-            logger.info(f"✅ Proxy valid tersimpan di Redis: {len(valid_proxies)}")
+        existing_proxies = redis_client.lrange("proxy_list", 0, -1)
+        new_proxies = [p for p in valid_proxies if p not in existing_proxies]
+        if new_proxies:
+            redis_client.rpush("proxy_list", *new_proxies)
+            logger.info(f"✅ Menambahkan {len(new_proxies)} proxy valid ke Redis. Total proxy sekarang: {redis_client.llen('proxy_list')}")
         else:
-            logger.warning("⚠️ Tidak ada proxy valid ditemukan")
+            logger.info("ℹ️ Tidak ada proxy baru untuk ditambahkan")
     except redis.RedisError as e:
         logger.error(f"❌ Gagal menyimpan proxy ke Redis: {e}")
 
@@ -254,18 +218,3 @@ def check_redis_connection():
     except redis.RedisError as e:
         logger.error(f"❌ Gagal terhubung ke Redis: {e}")
         return False
-
-def main():
-    logger.info("🚀 Proxy Scraper Started...")
-    scrape_and_store_proxies()  # Jalankan sekali saat start
-    schedule.every(5).minutes.do(scrape_and_store_proxies)
-    while True:
-        try:
-            schedule.run_pending()
-            time.sleep(1)
-        except Exception as e:
-            logger.error(f"❌ Error dalam loop utama: {e}")
-            time.sleep(60)  # Tunggu lebih lama jika error
-
-if __name__ == "__main__":
-    main()
