@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 async def fetch_google_suggestions(query):
-    url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={query}"
+    url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={query}&hl=id"
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 data = await response.json()
-                return data[1][:4] if len(data) > 1 else []  # Maksimal 4 saran
+                return data[1][:4] if len(data) > 1 else []  # Maksimal 4 saran dalam bahasa Indonesia
         except Exception as e:
             logger.error(f"❌ Gagal mengambil saran dari Google: {e}")
             return []
@@ -38,17 +38,29 @@ def train_markov(query):
         text_data = "\n".join(suggestions) if suggestions else "Cek harga barang secara online."
     else:
         text_data = "\n".join(chat_history)
-    return markovify.Text(text_data, state_size=1)  # State_size 1 untuk prediksi kalimat
+    return markovify.Text(text_data, state_size=1)
 
 def predict_markov(query):
     try:
         model = train_markov(query)
-        predictions = []
-        for _ in range(4):  # Maksimal 4 prediksi
+        predictions = set()
+        # Prediksi dari Markov
+        for _ in range(10):  # Coba lebih banyak untuk variasi
             sentence = model.make_short_sentence(140, tries=10)
-            if sentence and sentence not in predictions:
-                predictions.append(f"{query} {sentence.split()[-1]}")
-        return predictions
+            if sentence and f"{query} {sentence}" not in predictions:
+                predictions.add(f"{query} {sentence}")
+                if len(predictions) == 4:
+                    break
+        
+        # Jika kurang dari 4, tambahkan dari Google
+        if len(predictions) < 4:
+            google_preds = asyncio.run(fetch_google_suggestions(query))
+            for pred in google_preds:
+                if pred not in predictions and len(predictions) < 4:
+                    predictions.add(pred)
+                    save_chat_history(pred)  # Simpan ke Redis
+        
+        return list(predictions)[:4]
     except Exception as e:
         logger.error(f"❌ Gagal memprediksi Markov: {e}")
         return [f"{query} barang"]

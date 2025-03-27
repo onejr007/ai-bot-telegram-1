@@ -6,7 +6,6 @@ import asyncio
 import re
 import os
 import logging
-from collections import Counter
 from utils import normalize_price_query, save_price_history, find_price_in_history
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
@@ -24,11 +23,9 @@ USER_AGENTS = [
 def get_headers(site):
     referers = {
         "tokopedia": "https://www.tokopedia.com/",
-        "shopee": "https://shopee.co.id/",
         "lazada": "https://www.lazada.co.id/",
-        "bukalapak": "https://www.bukalapak.com/",
         "blibli": "https://www.blibli.com/",
-        "digimap": "https://www.digimap.co.id/",
+        "samsung": "https://www.samsung.com/id/",
     }
     return {
         "User-Agent": random.choice(USER_AGENTS),
@@ -41,12 +38,31 @@ def get_headers(site):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def get_valid_proxy():
-    proxy = redis_client.lpop("proxy_list")
-    if proxy:
-        redis_client.rpush("proxy_list", proxy)
+def get_valid_proxy(max_retries=3):
+    for attempt in range(max_retries):
+        proxy = redis_client.lpop("proxy_list")
+        if not proxy:
+            logger.warning("⚠️ Tidak ada proxy tersedia di Redis.")
+            return None
+        redis_client.rpush("proxy_list", proxy)  # Kembalikan ke daftar untuk digunakan
+        logger.info(f"ℹ️ Menggunakan proxy {proxy} pada percobaan {attempt + 1}.")
         return proxy
+    logger.warning(f"⚠️ Tidak ada proxy valid setelah {max_retries} percobaan.")
     return None
+
+def calculate_iqr_range(prices):
+    if not prices or len(prices) < 4:  # Butuh minimal 4 data untuk IQR yang bermakna
+        return None, None
+    sorted_prices = sorted(prices)
+    n = len(sorted_prices)
+    q1_idx = n // 4
+    q3_idx = (3 * n) // 4
+    q1 = sorted_prices[q1_idx]
+    q3 = sorted_prices[q3_idx]
+    iqr = q3 - q1
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    return max(0, lower_bound), upper_bound
 
 def clean_and_validate_prices(raw_prices, site):
     cleaned_prices = []
@@ -57,7 +73,7 @@ def clean_and_validate_prices(raw_prices, site):
             price_cleaned = re.sub(r"[^\d]", "", match.group(1))
             try:
                 num = int(price_cleaned)
-                if 1000 <= num <= 100_000_000:
+                if num >= 1000:  # Harga minimal realistis
                     cleaned_prices.append(num)
             except ValueError:
                 continue
@@ -67,12 +83,13 @@ def clean_and_validate_prices(raw_prices, site):
         logger.info(f"{site}: Tidak ada harga valid ditemukan")
         return {"max": "0", "min": "0", "avg": "0"}
     
-    price_counts = Counter(cleaned_prices)
-    most_common_price = price_counts.most_common(1)[0][0]
-    rational_range = (most_common_price * 0.7, most_common_price * 1.3)
-    
-    valid_prices = [p for p in cleaned_prices if rational_range[0] <= p <= rational_range[1]]
-    logger.info(f"{site}: Harga rasional (rentang {rational_range[0]:,}-{rational_range[1]:,}): {valid_prices}")
+    lower_bound, upper_bound = calculate_iqr_range(cleaned_prices)
+    if lower_bound is None:  # Jika data kurang dari 4, gunakan semua harga
+        valid_prices = cleaned_prices
+        logger.info(f"{site}: Data kurang dari 4, menggunakan semua harga: {valid_prices}")
+    else:
+        valid_prices = [p for p in cleaned_prices if lower_bound <= p <= upper_bound]
+        logger.info(f"{site}: Harga rasional (rentang {lower_bound:,}-{upper_bound:,}): {valid_prices}")
     
     if not valid_prices:
         logger.info(f"{site}: Tidak ada harga rasional ditemukan")
@@ -109,52 +126,31 @@ async def scrape_tokopedia_price(query):
             logger.error(f"Tokopedia: Gagal scraping: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
-async def scrape_bukalapak_price(query):
-    search_url = f"https://www.bukalapak.com/products?search[keywords]={query.replace(' ', '%20')}"
-    logger.info(f"Bukalapak: Memulai scraping - URL awal: {search_url}")
+async def scrape_lazada_price(query):
+    search_url = f"https://www.lazada.co.id/catalog/?q={query.replace(' ', '+')}"
+    logger.info(f"Lazada: Memulai scraping - URL awal: {search_url}")
     proxy = get_valid_proxy()
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(
                 search_url,
-                headers=get_headers("bukalapak"),
+                headers=get_headers("lazada"),
                 proxy=f"http://{proxy}" if proxy else None,
                 timeout=aiohttp.ClientTimeout(total=15)
             ) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
-                    logger.info(f"Bukalapak: Redirected ke: {redirected_url}")
+                    logger.info(f"Lazada: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
-                raw_prices = soup.select(".bl-product-card__price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Bukalapak: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
-                return clean_and_validate_prices(raw_prices, "Bukalapak")
+                raw_prices = soup.select(".price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
+                logger.info(f"Lazada: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
+                return clean_and_validate_prices(raw_prices, "Lazada")
         except Exception as e:
-            logger.error(f"Bukalapak: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
-            return {"max": "0", "min": "0", "avg": "0"}
-
-async def scrape_shopee_price(query):
-    search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
-    logger.info(f"Shopee: Memulai scraping - URL awal: {search_url}")
-    proxy = get_valid_proxy()
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(
-                search_url,
-                headers=get_headers("shopee"),
-                proxy=f"http://{proxy}" if proxy else None,
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                redirected_url = str(response.url)
-                if redirected_url != search_url:
-                    logger.info(f"Shopee: Redirected ke: {redirected_url}")
-                text = await response.text()
-                soup = BeautifulSoup(text, "html.parser")
-                raw_prices = soup.select(".shopee-search-item-result__item .price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Shopee: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
-                return clean_and_validate_prices(raw_prices, "Shopee")
-        except Exception as e:
-            logger.error(f"Shopee: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
+            logger.error(f"Lazada: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
+            if proxy:
+                logger.info(f"🗑️ Proxy {proxy} gagal, dihapus dari Redis.")
+                redis_client.lrem("proxy_list", 0, proxy)
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_blibli_price(query):
@@ -179,25 +175,32 @@ async def scrape_blibli_price(query):
                 return clean_and_validate_prices(raw_prices, "Blibli")
         except Exception as e:
             logger.error(f"Blibli: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
+            if proxy:
+                logger.info(f"🗑️ Proxy {proxy} gagal, dihapus dari Redis.")
+                redis_client.lrem("proxy_list", 0, proxy)
             return {"max": "0", "min": "0", "avg": "0"}
 
-async def scrape_digimap_price(query):
-    search_url = f"https://www.digimap.co.id/search?type=product&q={query.replace(' ', '+')}"
-    logger.info(f"Digimap: Memulai scraping - URL awal: {search_url}")
+async def scrape_samsung_price(query):
+    search_url = f"https://www.samsung.com/id/search/?searchvalue={query.replace(' ', '+')}"
+    logger.info(f"Samsung: Memulai scraping - URL awal: {search_url}")
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(search_url, headers=get_headers("digimap"), timeout=aiohttp.ClientTimeout(total=15)) as response:
+            async with session.get(search_url, headers=get_headers("samsung"), timeout=aiohttp.ClientTimeout(total=15)) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
-                    logger.info(f"Digimap: Redirected ke: {redirected_url}")
+                    logger.info(f"Samsung: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = soup.select(".price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"Digimap: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
-                return clean_and_validate_prices(raw_prices, "Digimap")
+                logger.info(f"Samsung: Harga mentah ditemukan: {[p.get_text(strip=True) if hasattr(p, 'get_text') else p for p in raw_prices]}")
+                return clean_and_validate_prices(raw_prices, "Samsung")
         except Exception as e:
-            logger.error(f"Digimap: Gagal scraping: {e}")
+            logger.error(f"Samsung: Gagal scraping: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
+
+def round_to_nearest_hundred_thousand(value):
+    """Bulatkan ke ratusan ribu terdekat."""
+    return round(value / 100000) * 100000
 
 async def scrape_price(query):
     logger.info(f"🔍 Mencari harga untuk: {query}")
@@ -215,41 +218,37 @@ async def scrape_price(query):
 
     tasks = [
         asyncio.wait_for(scrape_tokopedia_price(query), timeout=15),
-        asyncio.wait_for(scrape_bukalapak_price(query), timeout=15),
-        asyncio.wait_for(scrape_shopee_price(query), timeout=15),
+        asyncio.wait_for(scrape_lazada_price(query), timeout=15),
         asyncio.wait_for(scrape_blibli_price(query), timeout=15),
-        asyncio.wait_for(scrape_digimap_price(query), timeout=15),
+        asyncio.wait_for(scrape_samsung_price(query), timeout=15),
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
-    all_prices = []
+    all_valid_prices = []
     for i, result in enumerate(results):
         if not isinstance(result, Exception) and result["avg"] != "0":
-            site = ["Tokopedia", "Bukalapak", "Shopee", "Blibli", "Digimap"][i]
-            prices = [int(result["min"].replace(".", "")), int(result["max"].replace(".", "")), int(result["avg"].replace(".", ""))]
-            all_prices.extend(prices)
+            site = ["Tokopedia", "Lazada", "Blibli", "Samsung"][i]
+            prices = [
+                int(result["min"].replace(".", "")),
+                int(result["max"].replace(".", "")),
+                int(result["avg"].replace(".", ""))
+            ]
+            all_valid_prices.extend(prices)
+            logger.info(f"{site}: Menambahkan harga valid ke hasil akhir: {prices}")
     
-    if not all_prices:
+    if not all_valid_prices:
         logger.info(f"❌ Tidak ada hasil valid untuk {query} dari semua situs")
         return None
     
-    price_counts = Counter(all_prices)
-    most_common_price = price_counts.most_common(1)[0][0]
-    rational_range = (most_common_price * 0.7, most_common_price * 1.3)
-    valid_prices = [p for p in all_prices if rational_range[0] <= p <= rational_range[1]]
-    
-    if not valid_prices:
-        logger.info(f"❌ Tidak ada harga rasional untuk {query} dari semua situs")
-        return None
-    
-    min_avg = min(valid_prices)
-    max_avg = max(valid_prices)
-    avg_avg = round(sum(valid_prices) / len(valid_prices))
+    # Hitung min, max, dan avg dari semua harga valid, lalu bulatkan
+    min_price = round_to_nearest_hundred_thousand(min(all_valid_prices))
+    max_price = round_to_nearest_hundred_thousand(max(all_valid_prices))
+    avg_price = round_to_nearest_hundred_thousand(sum(all_valid_prices) / len(all_valid_prices))
     
     result = {
-        "max": "{:,.0f}".format(max_avg).replace(",", "."),
-        "min": "{:,.0f}".format(min_avg).replace(",", "."),
-        "avg": "{:,.0f}".format(avg_avg).replace(",", ".")
+        "max": "{:,.0f}".format(max_price).replace(",", "."),
+        "min": "{:,.0f}".format(min_price).replace(",", "."),
+        "avg": "{:,.0f}".format(avg_price).replace(",", ".")
     }
     save_price_history(query, f"Rp{result['min']} - Rp{result['max']}")
     logger.info(f"✅ Hasil akhir untuk {query}: {result}")
