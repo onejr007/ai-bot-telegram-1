@@ -6,7 +6,6 @@ import signal
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram.error import BadRequest
-import markovify
 import aiohttp
 from price_scraper import scrape_price
 from utils import load_chat_history, save_chat_history, normalize_price_query, logger
@@ -25,50 +24,65 @@ async def fetch_google_suggestions(query):
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 data = await response.json()
-                return data[1][:4] if len(data) > 1 else []  # Maksimal 4 saran dalam bahasa Indonesia
+                return data[1][:4] if len(data) > 1 else []
         except Exception as e:
             logger.error(f"❌ Gagal mengambil saran dari Google: {e}")
             return []
 
-async def train_markov(query):
-    chat_history = load_chat_history()
-    if not chat_history:
-        logger.info("ℹ️ Chat history kosong, menggunakan fallback Google.")
-        suggestions = await fetch_google_suggestions(query)
-        text_data = "\n".join(suggestions) if suggestions else "Cek harga barang secara online."
-    else:
-        text_data = "\n".join(chat_history)
-    return markovify.Text(text_data, state_size=1)
+async def fetch_bing_suggestions(query):
+    url = f"https://api.bing.com/qsonhs.aspx?type=cb&q={query}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                data = await response.json()
+                return [item["q"] for item in data["AS"]["Results"][0]["Suggests"]][:4] if "AS" in data else []
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil saran dari Bing: {e}")
+            return []
 
 async def predict_markov(query):
     try:
-        model = await train_markov(query)
         predictions = set()
-        # Prediksi dari Markov
-        for _ in range(20):  # Coba lebih banyak untuk variasi
-            sentence = model.make_short_sentence(140, tries=10)
-            if sentence:
-                pred = f"{query} {sentence.split()[-1]}"  # Ambil kata terakhir untuk variasi
-                if pred not in predictions:
-                    predictions.add(pred)
-                    if len(predictions) == 4:
-                        break
+        chat_history = load_chat_history()
+        query_words = query.split()
+
+        # Prioritaskan Redis
+        if chat_history:
+            logger.info(f"ℹ️ Mengambil prediksi dari Redis untuk '{query}'")
+            for entry in chat_history:
+                if entry.startswith(query) and entry != query and len(predictions) < 4:
+                    predictions.add(entry)
         
-        # Jika kurang dari 4, tambahkan dari Google
+        # Jika kurang dari 4, ambil dari Google dan Bing
         if len(predictions) < 4:
+            logger.info(f"ℹ️ Prediksi dari Redis kurang dari 4, melengkapi dari search engine.")
             google_preds = await fetch_google_suggestions(query)
-            for pred in google_preds:
-                if pred not in predictions and len(predictions) < 4:
+            bing_preds = await fetch_bing_suggestions(query)
+            all_preds = google_preds + bing_preds
+            for pred in all_preds:
+                if pred.startswith(query) and pred != query and pred not in predictions and len(predictions) < 4:
                     predictions.add(pred)
                     save_chat_history(pred)  # Simpan ke Redis
         
-        return list(predictions)[:4] if predictions else [f"{query} barang"]
+        # Jika masih kurang dari 4, tambahkan default
+        if len(predictions) < 4:
+            default_preds = [
+                f"{query} 15",
+                f"{query} 14",
+                f"{query} 13",
+                f"{query} 12"
+            ]
+            for default in default_preds:
+                if default != query and default not in predictions and len(predictions) < 4:
+                    predictions.add(default)
+        
+        return list(predictions)[:4]
     except Exception as e:
-        logger.error(f"❌ Gagal memprediksi Markov: {e}")
+        logger.error(f"❌ Gagal memprediksi: {e}")
         return [f"{query} barang"]
 
 def add_to_history(text):
-    if len(text.split()) > 1:  # Simpan hanya kalimat lengkap
+    if len(text.split()) > 1:
         save_chat_history(text)
 
 async def start(update: Update, context: CallbackContext):
