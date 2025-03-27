@@ -47,21 +47,21 @@ def get_valid_proxy():
         return proxy
     return None
 
-def clean_and_validate_prices(raw_prices):
+def clean_and_validate_prices(raw_prices, site):
     cleaned_prices = []
     for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d.,]", "", price.replace("Rp", "").strip())
-        price_cleaned = price_cleaned.replace(",", ".")
-        match = re.search(r"(\d+(?:\.\d+)*)", price_cleaned)
-        if match:
-            num = match.group().replace(".", "")
+        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())
+        if price_cleaned:
             try:
-                cleaned_prices.append(int(num))
+                num = int(price_cleaned)
+                cleaned_prices.append(num)
             except ValueError:
                 continue
+    logger.info(f"{site}: Harga integer setelah pembersihan: {cleaned_prices}")
     
-    valid_prices = [p for p in cleaned_prices if 1000 <= p <= 1_000_000_000]
+    valid_prices = [p for p in cleaned_prices if 1000 <= p <= 100_000_000]  # Batas maksimal Rp100 juta
     if not valid_prices:
+        logger.info(f"{site}: Tidak ada harga valid ditemukan")
         return {"max": "0", "min": "0", "avg": "0"}
     
     sorted_prices = sorted(valid_prices)
@@ -69,75 +69,71 @@ def clean_and_validate_prices(raw_prices):
     max_price = sorted_prices[-1]
     avg_price = round(sum(sorted_prices) / len(sorted_prices))
     
-    return {
-        "max": f"{max_price:,}".replace(",", "."),
-        "min": f"{min_price:,}".replace(",", "."),
-        "avg": f"{avg_price:,}".replace(",", ".")
+    result = {
+        "max": "{:,.0f}".format(max_price).replace(",", "."),
+        "min": "{:,.0f}".format(min_price).replace(",", "."),
+        "avg": "{:,.0f}".format(avg_price).replace(",", ".")
     }
+    logger.info(f"{site}: Harga setelah validasi: {result}")
+    return result
 
 async def scrape_tokopedia_price(query):
     search_url = f"https://www.tokopedia.com/search?st=product&q={query.replace(' ', '+')}"
-    logger.info(f"🌐 Memulai scraping Tokopedia - URL awal: {search_url}")
+    logger.info(f"Tokopedia: Memulai scraping - URL awal: {search_url}")
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(search_url, headers=get_headers("tokopedia"), timeout=aiohttp.ClientTimeout(total=15)) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
-                    logger.info(f"🔄 Redirected ke: {redirected_url}")
+                    logger.info(f"Tokopedia: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"💰 Harga mentah ditemukan: {raw_prices}")
-                result = clean_and_validate_prices(raw_prices)
-                logger.info(f"✅ Harga setelah validasi: {result}")
-                return result
+                logger.info(f"Tokopedia: Harga mentah ditemukan: {raw_prices}")
+                return clean_and_validate_prices(raw_prices, "Tokopedia")
         except Exception as e:
-            logger.error(f"❌ Gagal scraping Tokopedia: {e}")
+            logger.error(f"Tokopedia: Gagal scraping: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_bukalapak_price(query):
     search_url = f"https://www.bukalapak.com/products?search[keywords]={query.replace(' ', '%20')}"
-    logger.info(f"🌐 Memulai scraping Bukalapak - URL awal: {search_url}")
+    logger.info(f"Bukalapak: Memulai scraping - URL awal: {search_url}")
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(search_url, headers=get_headers("bukalapak"), timeout=aiohttp.ClientTimeout(total=15)) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
-                    logger.info(f"🔄 Redirected ke: {redirected_url}")
+                    logger.info(f"Bukalapak: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"💰 Harga mentah ditemukan: {raw_prices}")
-                result = clean_and_validate_prices(raw_prices)
-                logger.info(f"✅ Harga setelah validasi: {result}")
-                return result
+                logger.info(f"Bukalapak: Harga mentah ditemukan: {raw_prices}")
+                return clean_and_validate_prices(raw_prices, "Bukalapak")
         except Exception as e:
-            logger.error(f"❌ Gagal scraping Bukalapak: {e}")
+            logger.error(f"Bukalapak: Gagal scraping: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_shopee_price(query):
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
-    logger.info(f"🌐 Memulai scraping Shopee - URL awal: {search_url}")
+    logger.info(f"Shopee: Memulai scraping - URL awal: {search_url}")
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(search_url, headers=get_headers("shopee"), timeout=aiohttp.ClientTimeout(total=15)) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
-                    logger.info(f"🔄 Redirected ke: {redirected_url}")
+                    logger.info(f"Shopee: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"💰 Harga mentah ditemukan: {raw_prices}")
-                result = clean_and_validate_prices(raw_prices)
-                logger.info(f"✅ Harga setelah validasi: {result}")
-                return result
+                logger.info(f"Shopee: Harga mentah ditemukan: {raw_prices}")
+                return clean_and_validate_prices(raw_prices, "Shopee")
         except Exception as e:
-            logger.error(f"❌ Gagal scraping Shopee: {e}")
+            logger.error(f"Shopee: Gagal scraping: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_blibli_price(query):
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
-    logger.info(f"🌐 Memulai scraping Blibli - URL awal: {search_url}")
+    logger.info(f"Blibli: Memulai scraping - URL awal: {search_url}")
     proxy = get_valid_proxy()
     async with aiohttp.ClientSession() as session:
         try:
@@ -149,36 +145,32 @@ async def scrape_blibli_price(query):
             ) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
-                    logger.info(f"🔄 Redirected ke: {redirected_url}")
+                    logger.info(f"Blibli: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"💰 Harga mentah ditemukan: {raw_prices}")
-                result = clean_and_validate_prices(raw_prices)
-                logger.info(f"✅ Harga setelah validasi: {result}")
-                return result
+                logger.info(f"Blibli: Harga mentah ditemukan: {raw_prices}")
+                return clean_and_validate_prices(raw_prices, "Blibli")
         except Exception as e:
-            logger.error(f"❌ Gagal scraping Blibli{' dengan proxy ' + proxy if proxy else ''}: {e}")
+            logger.error(f"Blibli: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_digimap_price(query):
     search_url = f"https://www.digimap.co.id/search?type=product&q={query.replace(' ', '+')}"
-    logger.info(f"🌐 Memulai scraping Digimap - URL awal: {search_url}")
+    logger.info(f"Digimap: Memulai scraping - URL awal: {search_url}")
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(search_url, headers=get_headers("digimap"), timeout=aiohttp.ClientTimeout(total=15)) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
-                    logger.info(f"🔄 Redirected ke: {redirected_url}")
+                    logger.info(f"Digimap: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
                 raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
-                logger.info(f"💰 Harga mentah ditemukan: {raw_prices}")
-                result = clean_and_validate_prices(raw_prices)
-                logger.info(f"✅ Harga setelah validasi: {result}")
-                return result
+                logger.info(f"Digimap: Harga mentah ditemukan: {raw_prices}")
+                return clean_and_validate_prices(raw_prices, "Digimap")
         except Exception as e:
-            logger.error(f"❌ Gagal scraping Digimap: {e}")
+            logger.error(f"Digimap: Gagal scraping: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_price(query):
@@ -186,8 +178,12 @@ async def scrape_price(query):
     cached_answer = find_price_in_history(query)
     if cached_answer:
         min_max = cached_answer.split(" - ")
-        avg = str(round((int(min_max[0].replace("Rp", "").replace(".", "")) + int(min_max[1].replace("Rp", "").replace(".", ""))) / 2))
-        result = {"max": min_max[1].replace("Rp", ""), "min": min_max[0].replace("Rp", ""), "avg": f"{avg:,}".replace(",", ".")}
+        avg = round((int(min_max[0].replace("Rp", "").replace(".", "")) + int(min_max[1].replace("Rp", "").replace(".", ""))) / 2)
+        result = {
+            "max": "{:,.0f}".format(int(min_max[1].replace("Rp", "").replace(".", ""))).replace(",", "."),
+            "min": "{:,.0f}".format(int(min_max[0].replace("Rp", "").replace(".", ""))).replace(",", "."),
+            "avg": "{:,.0f}".format(avg).replace(",", ".")
+        }
         logger.info(f"🔄 Menggunakan cache: {result}")
         return result
 
@@ -202,7 +198,7 @@ async def scrape_price(query):
     
     valid_results = [r for r in results if not isinstance(r, Exception) and r["avg"] != "0"]
     if not valid_results:
-        logger.info(f"❌ Tidak ada hasil valid untuk {query}")
+        logger.info(f"❌ Tidak ada hasil valid untuk {query} dari semua situs")
         return None
     
     avg_values = [int(r["avg"].replace(".", "")) for r in valid_results]
@@ -211,9 +207,9 @@ async def scrape_price(query):
     avg_avg = round(sum(avg_values) / len(avg_values))
     
     result = {
-        "max": f"{max_avg:,}".replace(",", "."),
-        "min": f"{min_avg:,}".replace(",", "."),
-        "avg": f"{avg_avg:,}".replace(",", ".")
+        "max": "{:,.0f}".format(max_avg).replace(",", "."),
+        "min": "{:,.0f}".format(min_avg).replace(",", "."),
+        "avg": "{:,.0f}".format(avg_avg).replace(",", ".")
     }
     save_price_history(query, f"Rp{result['min']} - Rp{result['max']}")
     logger.info(f"✅ Hasil akhir untuk {query}: {result}")

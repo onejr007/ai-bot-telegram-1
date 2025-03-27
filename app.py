@@ -7,6 +7,7 @@ from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram.error import BadRequest
 import markovify
+import aiohttp
 from price_scraper import scrape_price
 from utils import load_chat_history, save_chat_history, normalize_price_query, logger
 
@@ -18,20 +19,32 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-def train_markov():
-    try:
-        with open("history_chat.txt", "r", encoding="utf-8") as f:
-            text_data = f.read().strip()
-        if not text_data or len(text_data.split()) < 5:
-            text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
-        return markovify.Text(text_data, state_size=2)
-    except FileNotFoundError:
-        text_data = "Selamat datang di bot prediksi teks. Silakan ketik sesuatu."
-        return markovify.Text(text_data, state_size=2)
+async def fetch_google_suggestions(query):
+    url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={query}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                data = await response.json()
+                return data[1] if len(data) > 1 else []
+        except Exception as e:
+            logger.error(f"❌ Gagal mengambil saran dari Google: {e}")
+            return []
+
+def train_markov(query):
+    chat_history = load_chat_history()
+    if not chat_history:
+        logger.info("ℹ️ Chat history kosong, menggunakan fallback Google.")
+        suggestions = asyncio.run(fetch_google_suggestions(query))
+        text_data = " ".join(suggestions) if suggestions else "Selamat datang di bot prediksi teks."
+    else:
+        text_data = " ".join(chat_history)
+    if len(text_data.split()) < 5:
+        text_data += " Selamat datang di bot prediksi teks."
+    return markovify.Text(text_data, state_size=2)
 
 def predict_markov(query):
     try:
-        model = train_markov()
+        model = train_markov(query)
         prediction = model.make_sentence(tries=10)
         return prediction or ""
     except Exception as e:
@@ -69,7 +82,7 @@ async def animate_search_message(message, stop_event):
     while not stop_event.is_set():
         try:
             elapsed = asyncio.get_event_loop().time() - start_time
-            if 60 <= elapsed < 61:  # 1 menit
+            if 60 <= elapsed < 61:
                 await message.reply_text("Mohon tunggu, Bot masih berjalan")
             await message.edit_text(dots[idx % 4])
             idx += 1
@@ -91,10 +104,9 @@ async def handle_message(update: Update, context: CallbackContext):
         try:
             normalized_query = normalize_price_query(text)
             add_to_history(f"harga {normalized_query}")
-            # Batasi waktu maksimal 3 menit
             prices = await asyncio.wait_for(scrape_price(normalized_query), timeout=180)
             stop_event.set()
-            await animation_task  # Tunggu animasi selesai
+            await animation_task
             if prices and prices["avg"] != "0":
                 answer = f"Kisaran Harga:\nMin: Rp{prices['min']}\nMax: Rp{prices['max']}\nRata-rata: Rp{prices['avg']}"
             else:
@@ -125,7 +137,7 @@ async def run_proxy_scraper_periodically():
             logger.info("✅ Proxy scraping selesai untuk iterasi ini")
         except Exception as e:
             logger.error(f"❌ Gagal menjalankan proxy scraper: {e}")
-        await asyncio.sleep(5 * 60)  # Tunggu 5 menit
+        await asyncio.sleep(5 * 60)
 
 async def shutdown(application):
     logger.info("🛑 Memulai proses shutdown bot...")
