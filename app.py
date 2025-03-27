@@ -14,8 +14,11 @@ from utils import load_chat_history, save_chat_history, normalize_price_query, l
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # Nonaktifkan log httpx
+logging.getLogger("telegram").setLevel(logging.WARNING)  # Nonaktifkan log telegram
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Tetap izinkan log INFO dari kode Anda
 
 def train_markov():
     try:

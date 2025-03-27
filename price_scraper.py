@@ -157,6 +157,8 @@ async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
         driver.get(search_url)
         WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CLASS_NAME, "blu-product-card__price-final")))
         if "challenge" in driver.current_url:
+            if use_proxy:
+                logger.info(f"🗑️ Proxy {proxy} terdeteksi diblokir (challenge), tidak digunakan lagi")
             return None
         price_elements = driver.find_elements(By.CLASS_NAME, "blu-product-card__price-final")
         raw_prices = [elem.text.strip() for elem in price_elements if elem.text.strip()]
@@ -171,14 +173,16 @@ async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
         return [f"Rp{avg_price:,}".replace(",", ".")]
     except Exception as e:
         logger.error(f"❌ Gagal scraping Blibli{' dengan proxy ' + proxy if use_proxy else ''}: {e}")
+        if use_proxy and ("timeout" in str(e).lower() or "connection" in str(e).lower()):
+            logger.info(f"🗑️ Proxy {proxy} gagal (timeout/koneksi), tidak dimasukkan kembali")
         return None if "challenge" in str(e).lower() else []
     finally:
         if driver:
             try:
-                driver.quit()  # Pastikan driver selalu ditutup
+                driver.quit()
             except Exception as e:
                 logger.warning(f"⚠️ Gagal menutup driver: {e}")
-                
+                           
 async def scrape_blibli_price(query):
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
     logger.info(f"🔄 Scraping Blibli untuk '{query}'...")
