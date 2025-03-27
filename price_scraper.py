@@ -6,6 +6,7 @@ import asyncio
 import re
 import os
 import logging
+from collections import Counter
 from utils import normalize_price_query, save_price_history, find_price_in_history
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
@@ -50,18 +51,32 @@ def get_valid_proxy():
 def clean_and_validate_prices(raw_prices, site):
     cleaned_prices = []
     for price in raw_prices:
-        price_cleaned = re.sub(r"[^\d]", "", price.replace("Rp", "").strip())
-        if price_cleaned:
+        # Ambil hanya bagian numerik pertama yang signifikan
+        match = re.search(r"Rp\s*(\d+(?:[.,]\d{3})*)", price)
+        if match:
+            price_cleaned = re.sub(r"[^\d]", "", match.group(1))
             try:
                 num = int(price_cleaned)
-                cleaned_prices.append(num)
+                if 1000 <= num <= 100_000_000:  # Batas Rp100 juta
+                    cleaned_prices.append(num)
             except ValueError:
                 continue
     logger.info(f"{site}: Harga integer setelah pembersihan: {cleaned_prices}")
     
-    valid_prices = [p for p in cleaned_prices if 1000 <= p <= 100_000_000]  # Batas maksimal Rp100 juta
-    if not valid_prices:
+    if not cleaned_prices:
         logger.info(f"{site}: Tidak ada harga valid ditemukan")
+        return {"max": "0", "min": "0", "avg": "0"}
+    
+    # Tentukan harga rasional berdasarkan modus
+    price_counts = Counter(cleaned_prices)
+    most_common_price = price_counts.most_common(1)[0][0]
+    rational_range = (most_common_price * 0.7, most_common_price * 1.3)  # Rentang 70%-130% dari modus
+    
+    valid_prices = [p for p in cleaned_prices if rational_range[0] <= p <= rational_range[1]]
+    logger.info(f"{site}: Harga rasional (rentang {rational_range[0]:,}-{rational_range[1]:,}): {valid_prices}")
+    
+    if not valid_prices:
+        logger.info(f"{site}: Tidak ada harga rasional ditemukan")
         return {"max": "0", "min": "0", "avg": "0"}
     
     sorted_prices = sorted(valid_prices)
@@ -88,7 +103,7 @@ async def scrape_tokopedia_price(query):
                     logger.info(f"Tokopedia: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
-                raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+                raw_prices = soup.select(".price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
                 logger.info(f"Tokopedia: Harga mentah ditemukan: {raw_prices}")
                 return clean_and_validate_prices(raw_prices, "Tokopedia")
         except Exception as e:
@@ -98,37 +113,49 @@ async def scrape_tokopedia_price(query):
 async def scrape_bukalapak_price(query):
     search_url = f"https://www.bukalapak.com/products?search[keywords]={query.replace(' ', '%20')}"
     logger.info(f"Bukalapak: Memulai scraping - URL awal: {search_url}")
+    proxy = get_valid_proxy()
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(search_url, headers=get_headers("bukalapak"), timeout=aiohttp.ClientTimeout(total=15)) as response:
+            async with session.get(
+                search_url,
+                headers=get_headers("bukalapak"),
+                proxy=f"http://{proxy}" if proxy else None,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
                     logger.info(f"Bukalapak: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
-                raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+                raw_prices = soup.select(".bl-product-card__price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
                 logger.info(f"Bukalapak: Harga mentah ditemukan: {raw_prices}")
                 return clean_and_validate_prices(raw_prices, "Bukalapak")
         except Exception as e:
-            logger.error(f"Bukalapak: Gagal scraping: {e}")
+            logger.error(f"Bukalapak: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_shopee_price(query):
     search_url = f"https://shopee.co.id/search?keyword={query.replace(' ', '%20')}"
     logger.info(f"Shopee: Memulai scraping - URL awal: {search_url}")
+    proxy = get_valid_proxy()
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(search_url, headers=get_headers("shopee"), timeout=aiohttp.ClientTimeout(total=15)) as response:
+            async with session.get(
+                search_url,
+                headers=get_headers("shopee"),
+                proxy=f"http://{proxy}" if proxy else None,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
                 redirected_url = str(response.url)
                 if redirected_url != search_url:
                     logger.info(f"Shopee: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
-                raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+                raw_prices = soup.select(".shopee-search-item-result__item .price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
                 logger.info(f"Shopee: Harga mentah ditemukan: {raw_prices}")
                 return clean_and_validate_prices(raw_prices, "Shopee")
         except Exception as e:
-            logger.error(f"Shopee: Gagal scraping: {e}")
+            logger.error(f"Shopee: Gagal scraping{' dengan proxy ' + proxy if proxy else ''}: {e}")
             return {"max": "0", "min": "0", "avg": "0"}
 
 async def scrape_blibli_price(query):
@@ -148,7 +175,7 @@ async def scrape_blibli_price(query):
                     logger.info(f"Blibli: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
-                raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+                raw_prices = soup.select(".product__price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
                 logger.info(f"Blibli: Harga mentah ditemukan: {raw_prices}")
                 return clean_and_validate_prices(raw_prices, "Blibli")
         except Exception as e:
@@ -166,7 +193,7 @@ async def scrape_digimap_price(query):
                     logger.info(f"Digimap: Redirected ke: {redirected_url}")
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
-                raw_prices = re.findall(r"Rp[\s]?\d+(?:[.,]\d+)*", soup.get_text())
+                raw_prices = soup.select(".price") or re.findall(r"Rp\s*\d+(?:[.,]\d+)*", soup.get_text())
                 logger.info(f"Digimap: Harga mentah ditemukan: {raw_prices}")
                 return clean_and_validate_prices(raw_prices, "Digimap")
         except Exception as e:

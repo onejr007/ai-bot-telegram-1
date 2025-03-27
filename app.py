@@ -86,11 +86,10 @@ async def animate_search_message(message, stop_event):
                 await message.reply_text("Mohon tunggu, Bot masih berjalan")
             await message.edit_text(dots[idx % 4])
             idx += 1
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)  # Interval lebih lambat agar terlihat
         except BadRequest as e:
-            if "Message is not modified" not in str(e):
-                logger.error(f"❌ Error saat mengedit pesan: {e}")
-                break
+            logger.debug(f"ℹ️ Pesan tidak dimodifikasi atau sudah dihapus: {e}")
+            break
         except Exception as e:
             logger.error(f"❌ Error tak terduga di animasi: {e}")
             break
