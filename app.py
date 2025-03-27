@@ -9,7 +9,6 @@ from telegram.error import BadRequest
 import markovify
 from price_scraper import scrape_price
 from utils import load_chat_history, save_chat_history, normalize_price_query, logger
-from proxy_scraper import scrape_and_store_proxies
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -63,22 +62,22 @@ async def inline_query(update: Update, context: CallbackContext):
     if results:
         await update.inline_query.answer(results, cache_time=1)
 
-async def animate_search_message(message):
+async def animate_search_message(message, stop_event):
     dots = ["🔍 Mencari harga", "🔍 Mencari harga.", "🔍 Mencari harga..", "🔍 Mencari harga..."]
     idx = 0
-    while True:
+    start_time = asyncio.get_event_loop().time()
+    while not stop_event.is_set():
         try:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if 60 <= elapsed < 61:  # 1 menit
+                await message.reply_text("Mohon tunggu, Bot masih berjalan")
             await message.edit_text(dots[idx % 4])
-            logger.debug(f"🔄 Animasi iterasi {idx}: {dots[idx % 4]}")
             idx += 1
             await asyncio.sleep(0.5)
         except BadRequest as e:
             if "Message is not modified" not in str(e):
                 logger.error(f"❌ Error saat mengedit pesan: {e}")
                 break
-        except asyncio.CancelledError:
-            logger.info("🛑 Animasi dibatalkan")
-            break
         except Exception as e:
             logger.error(f"❌ Error tak terduga di animasi: {e}")
             break
@@ -87,21 +86,27 @@ async def handle_message(update: Update, context: CallbackContext):
     text = update.message.text.strip().lower()
     if is_price_question(text):
         message = await update.message.reply_text("🔍 Mencari harga")
-        animation_task = asyncio.create_task(animate_search_message(message))
+        stop_event = asyncio.Event()
+        animation_task = asyncio.create_task(animate_search_message(message, stop_event))
         try:
             normalized_query = normalize_price_query(text)
             add_to_history(f"harga {normalized_query}")
-            prices = await scrape_price(normalized_query)
-            animation_task.cancel()
-            await asyncio.sleep(0.1)  # Beri waktu untuk pembatalan
+            # Batasi waktu maksimal 3 menit
+            prices = await asyncio.wait_for(scrape_price(normalized_query), timeout=180)
+            stop_event.set()
+            await animation_task  # Tunggu animasi selesai
             if prices and prices["avg"] != "0":
                 answer = f"Kisaran Harga:\nMin: Rp{prices['min']}\nMax: Rp{prices['max']}\nRata-rata: Rp{prices['avg']}"
             else:
-                answer = "❌ Tidak dapat menemukan harga untuk produk tersebut."
+                answer = f"❌ Tidak dapat menemukan harga untuk '{normalized_query}'."
             await message.edit_text(answer)
+        except asyncio.TimeoutError:
+            stop_event.set()
+            await animation_task
+            await message.edit_text(f"❌ Bot tidak bisa menemukan harga dari barang '{normalized_query}' dalam 3 menit.")
         except Exception as e:
-            animation_task.cancel()
-            await asyncio.sleep(0.1)
+            stop_event.set()
+            await animation_task
             await message.edit_text(f"❌ Terjadi kesalahan: {e}")
     else:
         await update.message.reply_text("Ini bukan pertanyaan harga. Fitur lain segera ditambahkan!")
@@ -114,12 +119,13 @@ async def run_proxy_scraper_periodically():
     while True:
         try:
             logger.info("🚀 Memulai scraping proxy...")
+            from proxy_scraper import scrape_and_store_proxies
             task = asyncio.create_task(scrape_and_store_proxies())
-            await task  # Tunggu hingga scraping selesai
+            await task
             logger.info("✅ Proxy scraping selesai untuk iterasi ini")
         except Exception as e:
             logger.error(f"❌ Gagal menjalankan proxy scraper: {e}")
-        await asyncio.sleep(5 * 60)  # Tunggu 5 menit sebelum iterasi berikutnya
+        await asyncio.sleep(5 * 60)  # Tunggu 5 menit
 
 async def shutdown(application):
     logger.info("🛑 Memulai proses shutdown bot...")
@@ -137,10 +143,8 @@ async def main():
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-    # Jalankan proxy scraper sebagai tugas latar belakang
     asyncio.create_task(run_proxy_scraper_periodically())
 
-    # Tangani sinyal shutdown untuk bot saja
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(app)))
@@ -150,7 +154,6 @@ async def main():
     await app.start()
     await app.updater.start_polling()
 
-    # Jaga agar main tetap berjalan sampai shutdown dipicu
     await asyncio.Event().wait()
 
 if __name__ == "__main__":

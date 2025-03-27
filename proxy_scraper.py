@@ -25,7 +25,7 @@ def get_headers(site):
         "google": "https://google.com",
         "proxyscrape": "https://api.proxyscrape.com",
         "blibli": "https://www.blibli.com",
-        "openproxy": "https://openproxy.space",
+        "hide-my-ip": "https://www.hide-my-ip.com",
         "proxy-list": "https://www.proxy-list.download",
         "httpbin": "http://httpbin.org",
         "proxynova": "https://www.proxynova.com",
@@ -53,18 +53,25 @@ async def test_proxy(proxy, timeout=3):
             logger.debug(f"Proxy {proxy} gagal: {e}")
             return False
 
-async def fetch_openproxyspace_proxies():
-    url = "https://openproxy.space/list/http"
+async def fetch_hide_my_ip_proxies():
+    url = "https://www.hide-my-ip.com/proxylist.shtml"
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, headers=get_headers("openproxy"), timeout=aiohttp.ClientTimeout(total=10)) as response:
+            async with session.get(url, headers=get_headers("hide-my-ip"), timeout=aiohttp.ClientTimeout(total=10)) as response:
                 response.raise_for_status()
                 text = await response.text()
                 soup = BeautifulSoup(text, "html.parser")
-                proxies = [item.text.strip() for item in soup.select(".list .item") if ":" in item.text.strip()]
+                proxies = []
+                for row in soup.select("table tr")[1:]:  # Skip header
+                    cols = row.find_all("td")
+                    if len(cols) > 1:
+                        ip = cols[0].text.strip()
+                        port = cols[1].text.strip()
+                        if ip and port and ":" not in ip:
+                            proxies.append(f"{ip}:{port}")
                 return proxies
         except Exception as e:
-            logger.error(f"❌ Gagal mengambil proxy dari OpenProxySpace: {e}")
+            logger.error(f"❌ Gagal mengambil proxy dari Hide My IP: {e}")
             return []
 
 async def fetch_proxy_list_download():
@@ -182,7 +189,7 @@ async def scrape_and_store_proxies():
         fetch_geonode_proxies(),
         fetch_free_proxy_list(),
         fetch_proxyscrape_proxies(),
-        fetch_openproxyspace_proxies(),
+        fetch_hide_my_ip_proxies(),
         fetch_proxy_list_download(),
         fetch_proxynova_proxies(),
         fetch_sslproxies_proxies()
