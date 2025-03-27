@@ -174,8 +174,11 @@ async def try_scrape_blibli(search_url, use_proxy=False, proxy=None):
         return None if "challenge" in str(e).lower() else []
     finally:
         if driver:
-            driver.quit()
-
+            try:
+                driver.quit()  # Pastikan driver selalu ditutup
+            except Exception as e:
+                logger.warning(f"⚠️ Gagal menutup driver: {e}")
+                
 async def scrape_blibli_price(query):
     search_url = f"https://www.blibli.com/cari/{query.replace(' ', '%20')}"
     logger.info(f"🔄 Scraping Blibli untuk '{query}'...")

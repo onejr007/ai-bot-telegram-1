@@ -33,7 +33,8 @@ def get_headers(site):
         "free-proxy-list": "https://free-proxy-list.net/",
         "proxylist": "https://proxylist.geonode.com/",
         "google": "https://google.com/",
-        "proxyscrape": "https://api.proxyscrape.com/"
+        "proxyscrape": "https://api.proxyscrape.com/",
+        "blibli": "https://www.blibli.com/",
     }
     return {
         "User-Agent": random.choice(USER_AGENTS),
@@ -47,11 +48,11 @@ def get_headers(site):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def test_proxy(proxy, timeout=5):
-    test_url = "http://www.google.com"
+def test_proxy(proxy, timeout=3):
+    test_url = "http://www.blibli.com"
     proxies = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
     try:
-        response = requests.get(test_url, proxies=proxies, headers=get_headers("google"), timeout=timeout)
+        response = requests.get(test_url, proxies=proxies, headers=get_headers("blibli"), timeout=timeout)
         return response.status_code == 200
     except Exception as e:
         logger.debug(f"Proxy {proxy} gagal: {e}")
@@ -117,7 +118,7 @@ def scrape_and_store_proxies():
     all_proxies = list(set(fetch_geonode_proxies() + fetch_free_proxy_list() + fetch_proxyscrape_proxies()))
     logger.info(f"Total proxy sebelum validasi: {len(all_proxies)}")
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:  # Kurangi dari 10 ke 5
         valid_proxies = [proxy for proxy, is_valid in zip(all_proxies, executor.map(test_proxy, all_proxies)) if is_valid]
     
     try:
@@ -130,6 +131,14 @@ def scrape_and_store_proxies():
     except redis.RedisError as e:
         logger.error(f"❌ Gagal menyimpan proxy ke Redis: {e}")
 
+def check_redis_connection():
+    try:
+        redis_client.ping()
+        return True
+    except redis.RedisError as e:
+        logger.error(f"❌ Gagal terhubung ke Redis: {e}")
+        return False
+    
 # proxy_scraper.py (lanjutan)
 def main():
     logger.info("🚀 Proxy Scraper Started...")

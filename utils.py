@@ -25,7 +25,9 @@ def load_chat_history():
     return redis_client.lrange("chat_history", 0, -1) or []
 
 def save_chat_history(text):
-    """Tambahkan teks ke chat history di Redis"""
+    if not check_redis_connection():
+        logger.warning(f"⚠️ Tidak bisa menyimpan '{text}' ke chat history karena Redis tidak tersedia")
+        return
     if text not in redis_client.lrange("chat_history", 0, -1):
         redis_client.rpush("chat_history", text)
         logger.info(f"📌 Menambahkan '{text}' ke chat history di Redis")
@@ -79,3 +81,11 @@ def normalize_price_query(text):
     text = " ".join(sorted(set(words), key=words.index))
     text = re.sub(r"\b(ipun|ipin|ipon|ip)(?:\s+(\d+))?\b", r"iphone \2", text).strip()
     return text.strip()
+
+def check_redis_connection():
+    try:
+        redis_client.ping()
+        return True
+    except redis.RedisError as e:
+        logger.error(f"❌ Gagal terhubung ke Redis: {e}")
+        return False

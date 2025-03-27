@@ -117,12 +117,16 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
     proxy_process = Process(target=proxy_scraper.main)
-    proxy_process.start()
-
-    logger.info("🚀 Bot Telegram sedang berjalan...")
-    app.run_polling()
-
-    proxy_process.terminate()
+    try:
+        proxy_process.start()
+        logger.info("🚀 Bot Telegram dan Proxy Scraper sedang berjalan...")
+        app.run_polling()
+    except Exception as e:
+        logger.error(f"❌ Gagal menjalankan bot atau proxy scraper: {e}")
+    finally:
+        if proxy_process.is_alive():
+            proxy_process.terminate()
+            logger.info("🛑 Proxy Scraper dihentikan.")
 
 if __name__ == "__main__":
     main()
