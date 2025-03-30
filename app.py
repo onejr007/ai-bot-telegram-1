@@ -16,6 +16,7 @@ from flask import Flask, render_template, jsonify
 from logging.handlers import QueueHandler
 from queue import Queue
 import redis
+import subprocess
 
 # Konfigurasi Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
@@ -79,6 +80,7 @@ def process_logs():
 # Endpoint Flask untuk dashboard
 @app.route('/')
 def dashboard():
+    logger.info("ℹ️ Mengakses endpoint dashboard")
     return render_template('dashboard.html')
 
 # API untuk data monitoring
@@ -255,10 +257,20 @@ async def run_proxy_scraper_periodically():
         await asyncio.sleep(5 * 60)
 
 async def run_flask():
-    from werkzeug.serving import run_simple
-    port = int(os.getenv("PORT", 8081))  # Gunakan 8081 sebagai default lokal, Railway akan override dengan PORT
-    logger.info(f"🚀 Menjalankan Flask server untuk monitoring pada port {port}...")
-    await asyncio.to_thread(run_simple, "0.0.0.0", port, app)
+    port = int(os.getenv("PORT", 8080))  # Gunakan PORT dari Railway, default 8080 untuk lokal
+    logger.info(f"🚀 Menjalankan Flask server dengan Gunicorn pada port {port}...")
+    # Jalankan Gunicorn sebagai proses terpisah
+    gunicorn_process = subprocess.Popen([
+        "gunicorn",
+        "--bind", f"0.0.0.0:{port}",
+        "--workers", "2",
+        "app:app"  # app:app berarti module app, object app (Flask instance)
+    ])
+    await asyncio.sleep(1)  # Beri waktu untuk memulai
+    if gunicorn_process.poll() is not None:
+        logger.error("❌ Gunicorn gagal dimulai")
+    else:
+        logger.info("✅ Gunicorn berjalan")
 
 async def shutdown(application):
     logger.info("🛑 Memulai proses shutdown bot...")
