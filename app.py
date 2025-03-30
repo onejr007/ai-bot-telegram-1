@@ -105,7 +105,7 @@ def check_redis_connection():
     except redis.RedisError:
         return False
 
-# Fungsi bot Telegram (tanpa perubahan besar, hanya contoh singkat)
+# Fungsi bot Telegram (tanpa perubahan besar)
 async def fetch_google_suggestions(query):
     url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={query}&hl=id"
     async with aiohttp.ClientSession() as session:
@@ -256,7 +256,7 @@ async def run_proxy_scraper_periodically():
 
 async def run_flask():
     from werkzeug.serving import run_simple
-    port = int(os.getenv("PORT", 5000))  # Gunakan PORT dari Railway, fallback ke 5000 untuk lokal
+    port = int(os.getenv("PORT", 8081))  # Gunakan 8081 sebagai default lokal, Railway akan override dengan PORT
     logger.info(f"🚀 Menjalankan Flask server untuk monitoring pada port {port}...")
     await asyncio.to_thread(run_simple, "0.0.0.0", port, app)
 
