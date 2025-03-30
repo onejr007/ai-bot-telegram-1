@@ -13,8 +13,8 @@ from price_scraper import scrape_price
 from utils import load_chat_history, save_chat_history, normalize_price_query, logger
 from proxy_scraper import scrape_and_store_proxies
 from flask import Flask, render_template, jsonify
-from logging.handlers import QueueHandler, Queue
-import queue
+from logging.handlers import QueueHandler
+from queue import Queue  # Perbaikan impor Queue
 import redis
 
 # Konfigurasi Redis
@@ -26,7 +26,7 @@ redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASS
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Setup logging dengan queue untuk frontend
-log_queue = queue.Queue()
+log_queue = Queue()
 log_handler = QueueHandler(log_queue)
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
