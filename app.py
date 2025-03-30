@@ -14,7 +14,7 @@ from utils import load_chat_history, save_chat_history, normalize_price_query, l
 from proxy_scraper import scrape_and_store_proxies
 from flask import Flask, render_template, jsonify
 from logging.handlers import QueueHandler
-from queue import Queue  # Perbaikan impor Queue
+from queue import Queue
 import redis
 
 # Konfigurasi Redis
@@ -41,7 +41,7 @@ log_buffer = []
 # Inisialisasi Flask
 app = Flask(__name__)
 
-# User agents dan headers (dari kode asli Anda)
+# User agents dan headers
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
@@ -84,7 +84,7 @@ def dashboard():
 # API untuk data monitoring
 @app.route('/api/monitoring')
 def monitoring_data():
-    process_logs()  # Proses log yang ada di queue
+    process_logs()
     redis_status = "Connected" if check_redis_connection() else "Disconnected"
     proxy_count = redis_client.llen("proxy_list") or 0
     chat_history_count = redis_client.llen("chat_history") or 0
@@ -105,7 +105,7 @@ def check_redis_connection():
     except redis.RedisError:
         return False
 
-# Fungsi bot Telegram (dari kode asli Anda)
+# Fungsi bot Telegram (tanpa perubahan besar, hanya contoh singkat)
 async def fetch_google_suggestions(query):
     url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={query}&hl=id"
     async with aiohttp.ClientSession() as session:
@@ -256,8 +256,9 @@ async def run_proxy_scraper_periodically():
 
 async def run_flask():
     from werkzeug.serving import run_simple
-    logger.info("🚀 Menjalankan Flask server untuk monitoring...")
-    await asyncio.to_thread(run_simple, "0.0.0.0", 5000, app)
+    port = int(os.getenv("PORT", 5000))  # Gunakan PORT dari Railway, fallback ke 5000 untuk lokal
+    logger.info(f"🚀 Menjalankan Flask server untuk monitoring pada port {port}...")
+    await asyncio.to_thread(run_simple, "0.0.0.0", port, app)
 
 async def shutdown(application):
     logger.info("🛑 Memulai proses shutdown bot...")
