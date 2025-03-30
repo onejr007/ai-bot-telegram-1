@@ -11,15 +11,37 @@ from telegram.error import BadRequest
 import aiohttp
 from price_scraper import scrape_price
 from utils import load_chat_history, save_chat_history, normalize_price_query, logger
+from proxy_scraper import scrape_and_store_proxies
+from flask import Flask, render_template, jsonify
+from logging.handlers import QueueHandler, Queue
+import queue
+import redis
+
+# Konfigurasi Redis
+REDIS_HOST = os.getenv("REDIS_HOST", "redis.railway.internal")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, db=0, decode_responses=True)
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# Setup logging dengan queue untuk frontend
+log_queue = queue.Queue()
+log_handler = QueueHandler(log_queue)
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+logger.addHandler(log_handler)
 
+# Buffer untuk menyimpan log terbaru (max 100 entri)
+log_buffer = []
+
+# Inisialisasi Flask
+app = Flask(__name__)
+
+# User agents dan headers (dari kode asli Anda)
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
@@ -45,14 +67,51 @@ def get_headers(site):
         "Connection": "keep-alive",
     }
 
+# Fungsi untuk memproses log ke buffer
+def process_logs():
+    while not log_queue.empty():
+        log_record = log_queue.get()
+        log_entry = f"{log_record.asctime} - {log_record.levelname} - {log_record.message}"
+        log_buffer.append(log_entry)
+        if len(log_buffer) > 100:  # Batasi 100 entri
+            log_buffer.pop(0)
+
+# Endpoint Flask untuk dashboard
+@app.route('/')
+def dashboard():
+    return render_template('dashboard.html')
+
+# API untuk data monitoring
+@app.route('/api/monitoring')
+def monitoring_data():
+    process_logs()  # Proses log yang ada di queue
+    redis_status = "Connected" if check_redis_connection() else "Disconnected"
+    proxy_count = redis_client.llen("proxy_list") or 0
+    chat_history_count = redis_client.llen("chat_history") or 0
+    price_history_count = redis_client.hlen("price_history") or 0
+    
+    return jsonify({
+        "logs": log_buffer,
+        "redis_status": redis_status,
+        "proxy_count": proxy_count,
+        "chat_history_count": chat_history_count,
+        "price_history_count": price_history_count
+    })
+
+def check_redis_connection():
+    try:
+        redis_client.ping()
+        return True
+    except redis.RedisError:
+        return False
+
+# Fungsi bot Telegram (dari kode asli Anda)
 async def fetch_google_suggestions(query):
     url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={query}&hl=id"
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url, headers=get_headers("google"), timeout=aiohttp.ClientTimeout(total=5)) as response:
-                # Ambil teks mentah karena MIME type bukan application/json
                 text = await response.text()
-                # Parse JSON secara manual
                 data = json.loads(text)
                 suggestions = data[1][:6] if len(data) > 1 else []
                 logger.info(f"ℹ️ Saran dari Google: {suggestions}")
@@ -66,9 +125,7 @@ async def fetch_bing_suggestions(query):
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url, headers=get_headers("bing"), timeout=aiohttp.ClientTimeout(total=5)) as response:
-                # Ambil teks mentah karena MIME type bukan application/json
                 text = await response.text()
-                # Parse JSON secara manual
                 data = json.loads(text)
                 suggestions = [item["q"] for item in data["AS"]["Results"][0]["Suggests"]][:6] if "AS" in data else []
                 logger.info(f"ℹ️ Saran dari Bing: {suggestions}")
@@ -82,22 +139,16 @@ async def predict_markov(query):
         predictions = set()
         chat_history = load_chat_history()
         query_words = query.split()
-
-        # 1. Prioritaskan Redis
         if chat_history:
             logger.info(f"ℹ️ Mengambil prediksi dari Redis untuk '{query}'")
             for entry in chat_history:
                 if entry.startswith(query) and entry != query and len(predictions) < 4:
                     predictions.add(entry)
-
-        # 2. Lengkapi dari Google dan Bing jika kurang dari 4
         if len(predictions) < 4:
             logger.info(f"ℹ️ Prediksi dari Redis kurang dari 4, melengkapi dari search engine.")
             google_preds = await fetch_google_suggestions(query)
             bing_preds = await fetch_bing_suggestions(query)
             all_preds = google_preds + bing_preds
-            
-            # Filter dan tambahkan prediksi yang relevan
             for pred in all_preds:
                 if (pred.startswith(query) and 
                     pred != query and 
@@ -106,19 +157,13 @@ async def predict_markov(query):
                     len(predictions) < 4):
                     predictions.add(pred)
                     save_chat_history(pred)
-
-        # 3. Fallback akhir hanya 2 opsi: second dan baru
         if len(predictions) < 4:
             logger.info(f"ℹ️ Prediksi masih kurang, menambahkan fallback akhir (second/baru).")
-            fallback_preds = [
-                f"{query} second",
-                f"{query} baru"
-            ]
+            fallback_preds = [f"{query} second", f"{query} baru"]
             for pred in fallback_preds:
                 if pred != query and pred not in predictions and len(predictions) < 4:
                     predictions.add(pred)
                     save_chat_history(pred)
-
         return list(predictions)[:4]
     except Exception as e:
         logger.error(f"❌ Gagal memprediksi: {e}")
@@ -203,13 +248,16 @@ async def run_proxy_scraper_periodically():
     while True:
         try:
             logger.info("🚀 Memulai scraping proxy...")
-            from proxy_scraper import scrape_and_store_proxies
-            task = asyncio.create_task(scrape_and_store_proxies())
-            await task
+            await scrape_and_store_proxies()
             logger.info("✅ Proxy scraping selesai untuk iterasi ini")
         except Exception as e:
             logger.error(f"❌ Gagal menjalankan proxy scraper: {e}")
         await asyncio.sleep(5 * 60)
+
+async def run_flask():
+    from werkzeug.serving import run_simple
+    logger.info("🚀 Menjalankan Flask server untuk monitoring...")
+    await asyncio.to_thread(run_simple, "0.0.0.0", 5000, app)
 
 async def shutdown(application):
     logger.info("🛑 Memulai proses shutdown bot...")
@@ -222,23 +270,26 @@ async def main():
         logger.error("❌ TELEGRAM_BOT_TOKEN tidak ditemukan!")
         return
 
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(InlineQueryHandler(inline_query))
-    app.add_handler(MessageHandler(filters.TEXT, handle_message))
+    telegram_app = Application.builder().token(TOKEN).build()
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(InlineQueryHandler(inline_query))
+    telegram_app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-    asyncio.create_task(run_proxy_scraper_periodically())
+    # Jalankan Flask dan Telegram bersamaan
+    tasks = [
+        run_flask(),
+        run_proxy_scraper_periodically(),
+        telegram_app.updater.start_polling()
+    ]
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(app)))
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(telegram_app)))
 
-    logger.info("🚀 Bot Telegram sedang berjalan...")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-
-    await asyncio.Event().wait()
+    logger.info("🚀 Bot Telegram dan Flask sedang berjalan...")
+    await telegram_app.initialize()
+    await telegram_app.start()
+    await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
     asyncio.run(main())
