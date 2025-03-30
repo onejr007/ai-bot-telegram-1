@@ -5,6 +5,7 @@ import uuid
 import signal
 import json
 import random
+import time
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, CallbackContext
 from telegram.error import BadRequest
@@ -72,7 +73,9 @@ def get_headers(site):
 def process_logs():
     while not log_queue.empty():
         log_record = log_queue.get()
-        log_entry = f"{log_record.asctime} - {log_record.levelname} - {log_record.message}"
+        # Format waktu dari log_record.created
+        log_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(log_record.created))
+        log_entry = f"{log_time} - {log_record.levelname} - {log_record.message}"
         log_buffer.append(log_entry)
         if len(log_buffer) > 100:  # Batasi 100 entri
             log_buffer.pop(0)
@@ -259,14 +262,13 @@ async def run_proxy_scraper_periodically():
 async def run_flask():
     port = int(os.getenv("PORT", 8080))  # Gunakan PORT dari Railway, default 8080 untuk lokal
     logger.info(f"🚀 Menjalankan Flask server dengan Gunicorn pada port {port}...")
-    # Jalankan Gunicorn sebagai proses terpisah
     gunicorn_process = subprocess.Popen([
         "gunicorn",
         "--bind", f"0.0.0.0:{port}",
         "--workers", "2",
-        "app:app"  # app:app berarti module app, object app (Flask instance)
+        "app:app"
     ])
-    await asyncio.sleep(1)  # Beri waktu untuk memulai
+    await asyncio.sleep(1)
     if gunicorn_process.poll() is not None:
         logger.error("❌ Gunicorn gagal dimulai")
     else:
