@@ -5,43 +5,274 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitoring Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <style>
         body { padding: 20px; }
         #log-container { max-height: 400px; overflow-y: auto; background: #f8f9fa; padding: 10px; }
         .status-connected { color: green; }
         .status-disconnected { color: red; }
+        .tab-content { margin-top: 20px; }
+        .modal-body input { width: 100%; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1 class="mb-4">Monitoring Dashboard</h1>
-        
-        <!-- Status Redis -->
-        <div class="card mb-4">
-            <div class="card-header">Redis Status</div>
-            <div class="card-body">
-                <p>Connection: <span id="redis-status" class="fw-bold"></span></p>
-                <p>Proxy Count: <span id="proxy-count" class="fw-bold"></span></p>
-                <p>Chat History Count: <span id="chat-history-count" class="fw-bold"></span></p>
-                <p>Price History Count: <span id="price-history-count" class="fw-bold"></span></p>
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs" id="myTab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs" type="button" role="tab" aria-controls="logs" aria-selected="true">Logs</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="proxies-tab" data-bs-toggle="tab" data-bs-target="#proxies" type="button" role="tab" aria-controls="proxies" aria-selected="false">Proxies</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="chat-history-tab" data-bs-toggle="tab" data-bs-target="#chat-history" type="button" role="tab" aria-controls="chat-history" aria-selected="false">Chat History</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="price-history-tab" data-bs-toggle="tab" data-bs-target="#price-history" type="button" role="tab" aria-controls="price-history" aria-selected="false">Price History</button>
+            </li>
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content" id="myTabContent">
+            <!-- Logs Tab -->
+            <div class="tab-pane fade show active" id="logs" role="tabpanel" aria-labelledby="logs-tab">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        Application Logs
+                        <button class="btn btn-primary btn-sm float-end" id="refresh-logs">Refresh</button>
+                        <button class="btn btn-danger btn-sm float-end me-2" id="clear-logs">Clear Logs</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="log-container" class="border rounded"></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">Redis Status</div>
+                    <div class="card-body">
+                        <p>Connection: <span id="redis-status" class="fw-bold"></span></p>
+                        <p>Proxy Count: <span id="proxy-count" class="fw-bold"></span></p>
+                        <p>Chat History Count: <span id="chat-history-count" class="fw-bold"></span></p>
+                        <p>Price History Count: <span id="price-history-count" class="fw-bold"></span></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Proxies Tab -->
+            <div class="tab-pane fade" id="proxies" role="tabpanel" aria-labelledby="proxies-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Proxy List
+                        <button class="btn btn-success btn-sm float-end" data-bs-toggle="modal" data-bs-target="#addProxyModal">Add Proxy</button>
+                    </div>
+                    <div class="card-body">
+                        <table id="proxy-table" class="table table-striped" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>Proxy</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat History Tab -->
+            <div class="tab-pane fade" id="chat-history" role="tabpanel" aria-labelledby="chat-history-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Chat History
+                        <button class="btn btn-success btn-sm float-end" data-bs-toggle="modal" data-bs-target="#addChatModal">Add Entry</button>
+                    </div>
+                    <div class="card-body">
+                        <table id="chat-table" class="table table-striped" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>Entry</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Price History Tab -->
+            <div class="tab-pane fade" id="price-history" role="tabpanel" aria-labelledby="price-history-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Price History
+                        <button class="btn btn-success btn-sm float-end" data-bs-toggle="modal" data-bs-target="#addPriceModal">Add Price</button>
+                    </div>
+                    <div class="card-body">
+                        <table id="price-table" class="table table-striped" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>Key</th>
+                                    <th>Value</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
+    </div>
 
-        <!-- Logs -->
-        <div class="card">
-            <div class="card-header">Application Logs</div>
-            <div class="card-body">
-                <div id="log-container" class="border rounded"></div>
+    <!-- Modal untuk Add Proxy -->
+    <div class="modal fade" id="addProxyModal" tabindex="-1" aria-labelledby="addProxyModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addProxyModalLabel">Add Proxy</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="new-proxy" class="form-control" placeholder="Enter proxy (e.g., 192.168.1.1:8080)">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="save-proxy">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal untuk Edit Proxy -->
+    <div class="modal fade" id="editProxyModal" tabindex="-1" aria-labelledby="editProxyModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editProxyModalLabel">Edit Proxy</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="edit-proxy-old" class="form-control" readonly>
+                    <input type="text" id="edit-proxy-new" class="form-control mt-2" placeholder="Enter new proxy">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="update-proxy">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal untuk Add Chat History -->
+    <div class="modal fade" id="addChatModal" tabindex="-1" aria-labelledby="addChatModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addChatModalLabel">Add Chat History</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="new-chat" class="form-control" placeholder="Enter chat entry">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="save-chat">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal untuk Edit Chat History -->
+    <div class="modal fade" id="editChatModal" tabindex="-1" aria-labelledby="editChatModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editChatModalLabel">Edit Chat History</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="edit-chat-old" class="form-control" readonly>
+                    <input type="text" id="edit-chat-new" class="form-control mt-2" placeholder="Enter new entry">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="update-chat">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal untuk Add Price History -->
+    <div class="modal fade" id="addPriceModal" tabindex="-1" aria-labelledby="addPriceModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addPriceModalLabel">Add Price History</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="new-price-key" class="form-control" placeholder="Enter key (e.g., item name)">
+                    <input type="text" id="new-price-value" class="form-control mt-2" placeholder="Enter value (e.g., {'min': '1000', 'max': '2000', 'avg': '1500'})">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="save-price">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal untuk Edit Price History -->
+    <div class="modal fade" id="editPriceModal" tabindex="-1" aria-labelledby="editPriceModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editPriceModalLabel">Edit Price History</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="edit-price-key" class="form-control" readonly>
+                    <input type="text" id="edit-price-value" class="form-control mt-2" placeholder="Enter new value">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="update-price">Update</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
     <script>
+        // Inisialisasi DataTables
+        let proxyTable = $('#proxy-table').DataTable({
+            paging: true,
+            pageLength: 10,
+            searching: true,
+            ordering: true
+        });
+
+        let chatTable = $('#chat-table').DataTable({
+            paging: true,
+            pageLength: 10,
+            searching: true,
+            ordering: true
+        });
+
+        let priceTable = $('#price-table').DataTable({
+            paging: true,
+            pageLength: 10,
+            searching: true,
+            ordering: true
+        });
+
         function updateDashboard() {
             $.getJSON('/api/monitoring', function(data) {
-                // Update Redis status
                 $('#redis-status').text(data.redis_status)
                     .removeClass('status-connected status-disconnected')
                     .addClass(data.redis_status === 'Connected' ? 'status-connected' : 'status-disconnected');
@@ -49,18 +280,251 @@
                 $('#chat-history-count').text(data.chat_history_count);
                 $('#price-history-count').text(data.price_history_count);
 
-                // Update logs
                 $('#log-container').empty();
                 data.logs.forEach(function(log) {
                     $('<p>').text(log).appendTo('#log-container');
                 });
+                $('#log-container').scrollTop($('#log-container')[0].scrollHeight);
             });
         }
 
-        // Refresh setiap 5 detik
+        function updateProxies() {
+            $.getJSON('/api/proxies', function(data) {
+                proxyTable.clear();
+                data.proxies.forEach(function(proxy) {
+                    proxyTable.row.add([
+                        proxy,
+                        `<button class="btn btn-warning btn-sm edit-proxy" data-proxy="${proxy}">Edit</button>
+                         <button class="btn btn-danger btn-sm delete-proxy" data-proxy="${proxy}">Delete</button>`
+                    ]);
+                });
+                proxyTable.draw();
+            });
+        }
+
+        function updateChatHistory() {
+            $.getJSON('/api/chat_history', function(data) {
+                chatTable.clear();
+                data.chat_history.forEach(function(entry) {
+                    chatTable.row.add([
+                        entry,
+                        `<button class="btn btn-warning btn-sm edit-chat" data-entry="${entry}">Edit</button>
+                         <button class="btn btn-danger btn-sm delete-chat" data-entry="${entry}">Delete</button>`
+                    ]);
+                });
+                chatTable.draw();
+            });
+        }
+
+        function updatePriceHistory() {
+            $.getJSON('/api/price_history', function(data) {
+                priceTable.clear();
+                Object.entries(data.price_history).forEach(function([key, value]) {
+                    priceTable.row.add([
+                        key,
+                        value,
+                        `<button class="btn btn-warning btn-sm edit-price" data-key="${key}" data-value='${value}'>Edit</button>
+                         <button class="btn btn-danger btn-sm delete-price" data-key="${key}">Delete</button>`
+                    ]);
+                });
+                priceTable.draw();
+            });
+        }
+
+        // Event untuk tombol
+        $('#refresh-logs').click(updateDashboard);
+        $('#clear-logs').click(function() {
+            $.post('/api/clear_logs', function(response) {
+                if (response.status === 'success') $('#log-container').empty();
+            });
+        });
+
+        // CRUD Proxy
+        $('#save-proxy').click(function() {
+            let proxy = $('#new-proxy').val();
+            $.ajax({
+                url: '/api/proxies',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ proxy: proxy }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $('#addProxyModal').modal('hide');
+                        updateProxies();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        $(document).on('click', '.edit-proxy', function() {
+            let proxy = $(this).data('proxy');
+            $('#edit-proxy-old').val(proxy);
+            $('#edit-proxy-new').val(proxy);
+            $('#editProxyModal').modal('show');
+        });
+
+        $('#update-proxy').click(function() {
+            let oldProxy = $('#edit-proxy-old').val();
+            let newProxy = $('#edit-proxy-new').val();
+            $.ajax({
+                url: '/api/proxies',
+                type: 'PUT',
+                contentType: 'application/json',
+                data: JSON.stringify({ old_proxy: oldProxy, new_proxy: newProxy }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $('#editProxyModal').modal('hide');
+                        updateProxies();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        $(document).on('click', '.delete-proxy', function() {
+            let proxy = $(this).data('proxy');
+            $.ajax({
+                url: '/api/proxies',
+                type: 'DELETE',
+                contentType: 'application/json',
+                data: JSON.stringify({ proxy: proxy }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        updateProxies();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        // CRUD Chat History
+        $('#save-chat').click(function() {
+            let entry = $('#new-chat').val();
+            $.ajax({
+                url: '/api/chat_history',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ entry: entry }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $('#addChatModal').modal('hide');
+                        updateChatHistory();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        $(document).on('click', '.edit-chat', function() {
+            let entry = $(this).data('entry');
+            $('#edit-chat-old').val(entry);
+            $('#edit-chat-new').val(entry);
+            $('#editChatModal').modal('show');
+        });
+
+        $('#update-chat').click(function() {
+            let oldEntry = $('#edit-chat-old').val();
+            let newEntry = $('#edit-chat-new').val();
+            $.ajax({
+                url: '/api/chat_history',
+                type: 'PUT',
+                contentType: 'application/json',
+                data: JSON.stringify({ old_entry: oldEntry, new_entry: newEntry }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $('#editChatModal').modal('hide');
+                        updateChatHistory();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        $(document).on('click', '.delete-chat', function() {
+            let entry = $(this).data('entry');
+            $.ajax({
+                url: '/api/chat_history',
+                type: 'DELETE',
+                contentType: 'application/json',
+                data: JSON.stringify({ entry: entry }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        updateChatHistory();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        // CRUD Price History
+        $('#save-price').click(function() {
+            let key = $('#new-price-key').val();
+            let value = JSON.parse($('#new-price-value').val());
+            $.ajax({
+                url: '/api/price_history',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ key: key, value: value }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $('#addPriceModal').modal('hide');
+                        updatePriceHistory();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        $(document).on('click', '.edit-price', function() {
+            let key = $(this).data('key');
+            let value = $(this).data('value');
+            $('#edit-price-key').val(key);
+            $('#edit-price-value').val(value);
+            $('#editPriceModal').modal('show');
+        });
+
+        $('#update-price').click(function() {
+            let key = $('#edit-price-key').val();
+            let value = JSON.parse($('#edit-price-value').val());
+            $.ajax({
+                url: '/api/price_history',
+                type: 'PUT',
+                contentType: 'application/json',
+                data: JSON.stringify({ key: key, value: value }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $('#editPriceModal').modal('hide');
+                        updatePriceHistory();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        $(document).on('click', '.delete-price', function() {
+            let key = $(this).data('key');
+            $.ajax({
+                url: '/api/price_history',
+                type: 'DELETE',
+                contentType: 'application/json',
+                data: JSON.stringify({ key: key }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        updatePriceHistory();
+                        updateDashboard();
+                    }
+                }
+            });
+        });
+
+        // Update otomatis dan saat tab dibuka
         setInterval(updateDashboard, 5000);
         $(document).ready(function() {
-            updateDashboard(); // Load pertama kali
+            updateDashboard();
+            $('#proxies-tab').on('shown.bs.tab', updateProxies);
+            $('#chat-history-tab').on('shown.bs.tab', updateChatHistory);
+            $('#price-history-tab').on('shown.bs.tab', updatePriceHistory);
         });
     </script>
 </body>
